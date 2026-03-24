@@ -1,4 +1,4 @@
-// Copyright 2019 DeepMind Technologies Limited
+// Copyright 2021 DeepMind Technologies Limited
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,20 +12,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "open_spiel/games/go/sgf_reader.h"
+#ifndef OPEN_SPIEL_UTILS_SGF_READER_H_
+#define OPEN_SPIEL_UTILS_SGF_READER_H_
 
-#include <memory>
+// A general SGF game reader.
+//
+// Supports a subset of SGF properties seen below. This is mainly used as a way
+// to start the game from a particular state.
+//
+// One restriction is that there cannot both have (B or W) properties in the
+// same variation if there are also (AB or AW) properties. In other words, each
+// variation can only have one of (B or W) properties or (AB or AW) properties,
+// but not both.
+//
+// SGF spec here:
+// - https://homepages.cwi.nl/~aeb/go/misc/sgf.html
+// - https://www.red-bean.com/sgf/ff1_3/ff3.html
+
 #include <string>
-
-#include "open_spiel/game_parameters.h"
-#include "open_spiel/games/go/go.h"
-#include "open_spiel/spiel.h"
-#include "open_spiel/spiel_utils.h"
-#include "open_spiel/tests/basic_tests.h"
+#include <vector>
+#include "open_spiel/utils/status.h"
 
 namespace open_spiel {
-namespace go {
-namespace {
 
 // Example SGF strings used for testing.
 
@@ -34,7 +42,7 @@ namespace {
 //
 // Nicely formatted game with root node and a single variation and one node per
 // mode.
-constexpr const char* kExampleSgfString = R"###(
+constexpr const char* kExampleGoSgfString = R"###(
 (;GM[1]RE[B+R]PW[Hashimoto Utaro]PB[Fujisawa Shuko]DT[1976-12-02,03]SZ[19]KM[5.5]ID[ 1/1]FF[3];B[pd];W[cq];B[pq];W[po];B[dd];W[oq];B[or];W[op];B[nq]
 ;W[nr];B[mr];W[pr];B[ns];W[qq];B[mo];W[jc];B[qm];W[mn];B[nn]
 ;W[pm];B[pl];W[om];B[nm];W[ol];B[pk];W[qi];B[ok];W[nl];B[mm]
@@ -55,7 +63,7 @@ constexpr const char* kExampleSgfString = R"###(
 
 // Example with two variations within a entry (one root node and two
 // variations), where each variation starts with '(' and end with ')'.
-constexpr const char* kExampleSgfString2 = R"###(
+constexpr const char* kExampleGoSgfString2 = R"###(
 (;FF[4]GM[1]CA[UTF-8]AP[besogo:0.0.2-alpha]SZ[9]ST[0]
 
 (;B[de]
@@ -66,52 +74,42 @@ constexpr const char* kExampleSgfString2 = R"###(
 
 // Example with AB and AW properties directly in the root node and without a
 // prepended ';'.
-constexpr const char* kExampleSgfString3 = R"###(
+constexpr const char* kExampleGoSgfString3 = R"###(
 (;FF[4]GM[1]CA[UTF-8]AP[besogo:0.0.2-alpha]SZ[13]ST[0]
 AB[ik][il][jd][jk][kj][kl][lj]AW[dd][dj][jj])
 )###";
 
-void BasicSGFReaderTests() {
-  VectorOfGamesAndStates games_and_states =
-      LoadGamesFromSGFString(kExampleSgfString);
-  SPIEL_CHECK_EQ(games_and_states.size(), 1);
+struct SgfProperty {
+  std::string name;
+  std::vector<std::string> values;
+};
 
-  games_and_states = LoadGamesFromSGFString(kExampleSgfString2);
-  SPIEL_CHECK_EQ(games_and_states.size(), 2);
+struct SgfNode {
+  std::vector<SgfProperty> properties;
+  std::vector<SgfNode> children;
+};
 
-  games_and_states = LoadGamesFromSGFString(kExampleSgfString3);
-  SPIEL_CHECK_EQ(games_and_states.size(), 1);
-}
+class SgfReader {
+ public:
+  explicit SgfReader(const std::string& sgf_string)
+      : sgf_string_(sgf_string), index_(0) {}
 
-void SimTestsConstructedFromSGFStrings() {
-  GameParameters params;
-  std::shared_ptr<const Game> game;
-  std::unique_ptr<State> state;
+  StatusWithValue<std::vector<SgfNode>> ReadAllNodes();
 
-  params["board_size"] = GameParameter(19);
-  params["komi"] = GameParameter(5.5);
-  game = LoadGame("go", params);
-  state = game->NewInitialState(kExampleSgfString);
-  testing::RandomSimTestWithSpecificInitialState(*game, 1, state.get());
+ private:
+  StatusWithValue<SgfNode> ReadNode();
+  void SkipWhitespace();
+  StatusWithValue<std::string> ReadPropertyName();
+  StatusWithValue<std::vector<std::string>> ReadPropertyValues();
+  StatusWithValue<std::vector<SgfProperty>> ReadPropertiesAndValues();
 
-  params["board_size"] = GameParameter(9);
-  params["komi"] = GameParameter(kDefaultKomi);
-  game = LoadGame("go", params);
-  state = game->NewInitialState(kExampleSgfString2);
-  testing::RandomSimTestWithSpecificInitialState(*game, 1, state.get());
+  std::string sgf_string_;
+  int index_;
+};
 
-  params["board_size"] = GameParameter(13);
-  params["komi"] = GameParameter(kDefaultKomi);
-  game = LoadGame("go", params);
-  state = game->NewInitialState(kExampleSgfString3);
-  testing::RandomSimTestWithSpecificInitialState(*game, 1, state.get());
-}
+StatusWithValue<std::vector<SgfNode>> ReadSgfString(
+    const std::string& sgf_string);
 
-}  // namespace
-}  // namespace go
 }  // namespace open_spiel
 
-int main(int argc, char** argv) {
-  open_spiel::go::BasicSGFReaderTests();
-  open_spiel::go::SimTestsConstructedFromSGFStrings();
-}
+#endif  // OPEN_SPIEL_UTILS_SGF_READER_H_

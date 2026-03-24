@@ -36,7 +36,8 @@
 #include "open_spiel/observer.h"
 #include "open_spiel/pybind11_json/include/pybind11_json/pybind11_json.hpp"
 #include "open_spiel/python/pybind11/algorithms_corr_dist.h"
-#include "open_spiel/python/pybind11/algorithms_infostate_tree.h"
+// Disabled while tests aren't passing. See GitHub issue #1502.
+// #include "open_spiel/python/pybind11/algorithms_infostate_tree.h"
 #include "open_spiel/python/pybind11/algorithms_trajectories.h"
 #include "open_spiel/python/pybind11/bots.h"
 #include "open_spiel/python/pybind11/evaluation_elo.h"
@@ -97,7 +98,7 @@
 #include "open_spiel/python/pybind11/games_universal_poker.h"
 #endif
 
-#define PYSPIEL_VERSION "1.6.11"
+#define PYSPIEL_VERSION "1.6.12"
 
 // Flags governing Open Spiel behaviour
 ABSL_FLAG(bool, log_exceptions_to_stderr, true,
@@ -788,6 +789,7 @@ PYBIND11_MODULE(pyspiel, m) {
   m.def("random_sim_test_with_specific_initial_state",
         testing::RandomSimTestWithSpecificInitialState, py::arg("game"),
         py::arg("num_sims"), py::arg("specific_initial_state"),
+        py::arg("serialize") = true,
         "Run the C++ tests on a game with a specific initial state.");
 
   m.def("build_state_from_history_string", BuildStateFromHistoryString,
@@ -805,8 +807,10 @@ PYBIND11_MODULE(pyspiel, m) {
     throw SpielException(string);
   });
   py::register_exception<SpielException>(m, "SpielError", PyExc_RuntimeError);
-  py::register_exception<ForbiddenException>(m, "ForbiddenError",
-                                             PyExc_RuntimeError);
+  // Disabled while tests aren't passing. See GitHub issue #1502.
+  // This exception is part of the infoset_tree bindings.
+  // py::register_exception<ForbiddenException>(m, "ForbiddenError",
+  //                                           PyExc_RuntimeError);
 
   // Register other bits of the API.
   init_pyspiel_bots(m);                     // Bots and bot-related algorithms.
@@ -845,8 +849,9 @@ PYBIND11_MODULE(pyspiel, m) {
   bind_repeated_pokerkit_state_struct(m);  // C++ struct for a Python game.
   init_pyspiel_observer(m);                 // Observers and observations.
   init_pyspiel_utils(m);                    // Utilities.
-  init_pyspiel_infostate_tree(
-      m);  // Infostate-Tree and associated classes (Id etc.)
+  // Disabled while tests aren't passing. See GitHub issue #1502.
+  // init_pyspiel_infostate_tree(
+  //     m);  // Infostate-Tree and associated classes (Id etc.)
 
   // List of optional python submodules.
 #if OPEN_SPIEL_BUILD_WITH_GAMUT

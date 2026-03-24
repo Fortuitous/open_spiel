@@ -12,22 +12,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for the game-specific functions for go."""
-
-import json
+"""Tests for reading SGF files in pyspiel utils."""
 
 from absl.testing import absltest
 
 import pyspiel
-
-go = pyspiel.go
 
 # First game of Kisei collection, taken from here:
 # https://webdocs.cs.ualberta.ca/~mmueller/go/games.html
 #
 # Nicely formatted game with root node and a single variation and one node per
 # mode.
-EXAMPLE_SGF_STRING = """
+EXAMPLE_GO_SGF_STRING = """
 (;GM[1]RE[B+R]PW[Hashimoto Utaro]PB[Fujisawa Shuko]DT[1976-12-02,03]SZ[19]KM[5.5]ID[ 1/1]FF[3];B[pd];W[cq];B[pq];W[po];B[dd];W[oq];B[or];W[op];B[nq]
 ;W[nr];B[mr];W[pr];B[ns];W[qq];B[mo];W[jc];B[qm];W[mn];B[nn]
 ;W[pm];B[pl];W[om];B[nm];W[ol];B[pk];W[qi];B[ok];W[nl];B[mm]
@@ -48,7 +44,7 @@ EXAMPLE_SGF_STRING = """
 
 # Example with two variations within a entry (one root node and two
 # variations), where each variation starts with '(' and end with ')'.
-EXAMPLE_SGF_STRING_2 = """
+EXAMPLE_GO_SGF_STRING2 = """
 (;FF[4]GM[1]CA[UTF-8]AP[besogo:0.0.2-alpha]SZ[9]ST[0]
 
 (;B[de]
@@ -59,52 +55,58 @@ EXAMPLE_SGF_STRING_2 = """
 
 # Example with AB and AW properties directly in the root node and without a
 # prepended ';'.
-EXAMPLE_SGF_STRING_3 = """
+EXAMPLE_GO_SGF_STRING3 = """
 (;FF[4]GM[1]CA[UTF-8]AP[besogo:0.0.2-alpha]SZ[13]ST[0]
 AB[ik][il][jd][jk][kj][kl][lj]AW[dd][dj][jj])
 """
 
 
-class GamesGoTest(absltest.TestCase):
+class SgfReaderTest(absltest.TestCase):
 
-  def test_json(self):
-    game = pyspiel.load_game("go")
-    state = game.new_initial_state()
-    state_struct = state.to_struct()
-    self.assertEqual(state_struct.current_player, "B")
-    self.assertEqual(state_struct.board_grid[0][0]["a1"], "EMPTY")
-    state.apply_action(0)
-    state_json = state.to_json()
-    state_dict = json.loads(state_json)
-    state_struct = go.GoStateStruct(state_json)
-    self.assertEqual(state_struct.current_player, "W")
-    self.assertEqual(state_dict["current_player"], "W")
-    self.assertEqual(state_struct.board_grid[0][0]["a1"], "B")
-    self.assertEqual(state_struct.to_json(),
-                     json.dumps(state_dict, separators=(",", ":")))
+  def test_sgf_reader(self):
+    with self.subTest(name="sgf_reader_go_example"):
+      status_with_nodes = pyspiel.read_sgf_string(EXAMPLE_GO_SGF_STRING)
+      self.assertTrue(status_with_nodes.ok())
+      nodes = status_with_nodes.value()
+      self.assertLen(nodes, 1)
+      node = nodes[0]
+      self.assertLen(node.properties, 9)
+      self.assertLen(node.children, 1)
+      self.assertLen(node.children[0].children, 1)
+      self.assertEqual(node.children[0].properties[0].name, "B")
+      self.assertEqual(node.children[0].properties[0].values[0], "pd")
+      self.assertLen(node.children[0].children[0].children, 1)
 
-  def test_games_load_from_sgf_string(self):
-    games_and_states = go.load_games_from_sgf_string(EXAMPLE_SGF_STRING)
-    self.assertLen(games_and_states, 1)
-    pyspiel.random_sim_test_with_specific_initial_state(
-        games_and_states[0][0], 1, games_and_states[0][1], serialize=True
-    )
+    with self.subTest(name="sgf_reader_go_example_2"):
+      status_with_nodes = pyspiel.read_sgf_string(EXAMPLE_GO_SGF_STRING2)
+      self.assertTrue(status_with_nodes.ok())
+      nodes = status_with_nodes.value()
+      self.assertLen(nodes, 1)
+      node = nodes[0]
+      self.assertLen(node.properties, 6)
+      self.assertLen(node.children, 2)
+      self.assertLen(node.children[0].children, 1)
+      self.assertEqual(node.children[0].properties[0].name, "B")
+      self.assertEqual(node.children[0].properties[0].values[0], "de")
+      self.assertEmpty(node.children[0].children[0].children)
+      self.assertEqual(node.children[0].children[0].properties[0].name, "W")
+      self.assertEqual(node.children[0].children[0].properties[0].values[0],
+                       "ee")
 
-    games_and_states = go.load_games_from_sgf_string(EXAMPLE_SGF_STRING_2)
-    self.assertLen(games_and_states, 2)
-    pyspiel.random_sim_test_with_specific_initial_state(
-        games_and_states[0][0], 1, games_and_states[0][1], serialize=True
-    )
-    pyspiel.random_sim_test_with_specific_initial_state(
-        games_and_states[1][0], 1, games_and_states[1][1], serialize=False
-    )
-
-    games_and_states = go.load_games_from_sgf_string(EXAMPLE_SGF_STRING_3)
-    self.assertLen(games_and_states, 1)
-    pyspiel.random_sim_test_with_specific_initial_state(
-        games_and_states[0][0], 1, games_and_states[0][1], serialize=False
-    )
+    with self.subTest(name="sgf_reader_go_example_3"):
+      status_with_nodes = pyspiel.read_sgf_string(EXAMPLE_GO_SGF_STRING3)
+      self.assertTrue(status_with_nodes.ok())
+      nodes = status_with_nodes.value()
+      self.assertLen(nodes, 1)
+      node = nodes[0]
+      self.assertLen(node.properties, 8)
+      self.assertEmpty(node.children)
+      self.assertEqual(node.properties[6].name, "AB")
+      self.assertLen(node.properties[6].values, 7)
+      self.assertEqual(node.properties[7].name, "AW")
+      self.assertLen(node.properties[7].values, 3)
 
 
 if __name__ == "__main__":
   absltest.main()
+
