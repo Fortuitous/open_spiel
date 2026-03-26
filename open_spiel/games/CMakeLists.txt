@@ -5,6 +5,8 @@ set(GAME_SOURCES
   antichess/antichess.h
   backgammon/backgammon.cc
   backgammon/backgammon.h
+  banqi/banqi.cc
+  banqi/banqi.h
   bargaining/bargaining.cc
   bargaining/bargaining.h
   bargaining/bargaining_instances1000.cc
@@ -332,6 +334,10 @@ add_test(antichess_test antichess_test)
 add_executable(backgammon_test backgammon/backgammon_test.cc ${OPEN_SPIEL_OBJECTS}
                $<TARGET_OBJECTS:tests>)
 add_test(backgammon_test backgammon_test)
+
+add_executable(banqi_test banqi/banqi_test.cc ${OPEN_SPIEL_OBJECTS}
+               $<TARGET_OBJECTS:tests>)
+add_test(banqi_test banqi_test)
 
 add_executable(bargaining_instance_generator bargaining/bargaining_instance_generator.cc
                ${OPEN_SPIEL_OBJECTS})
