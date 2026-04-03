@@ -169,109 +169,72 @@ std::string BackgammonState::ActionToString(Player player,
                           kChanceOutcomeValues[move_id][1], ")");
     }
   } else {
-    // Assemble a human-readable string representation of the move using
-    // standard backgammon notation:
-    //
-    // - Always show the numbering going from Bar->24->0->Off, irrespective of
-    //   which player is moving.
-    // - Show the start position followed by end position.
-    // - Show hits with an asterisk, e.g. 9/7*.
-    // - Order the moves by highest number first, e.g. 22/7 10/8 not 10/8 22/7.
-    //   Not an official requirement, but seems to be standard convention.
-    // - Show duplicate moves as 10/8(2).
-    // - Show moves on a single piece as 10/8/5 not 10/8 8/5
-    //
-    // Note that there are tests to ensure the ActionToString follows this
-    // output format. Any changes would need to be reflected in the tests as
-    // well.
     std::vector<CheckerMove> cmoves = SpielMoveToCheckerMoves(player, move_id);
-
-    int cmove0_start;
-    int cmove1_start;
-    if (player == kOPlayerId) {
-      cmove0_start = (cmoves[0].pos == kBarPos ? kNumBarPosHumanReadable
-                                               : cmoves[0].pos + 1);
-      cmove1_start = (cmoves[1].pos == kBarPos ? kNumBarPosHumanReadable
-                                               : cmoves[1].pos + 1);
-    } else {
-      // swap the board numbering round for Player X so player is moving
-      // from 24->0
-      cmove0_start = (cmoves[0].pos == kBarPos ? kNumBarPosHumanReadable
-                                               : kNumPoints - cmoves[0].pos);
-      cmove1_start = (cmoves[1].pos == kBarPos ? kNumBarPosHumanReadable
-                                               : kNumPoints - cmoves[1].pos);
-    }
-
-    // Add hit information and compute whether the moves go off the board.
-    int cmove0_end = AugmentCheckerMove(&cmoves[0], player, cmove0_start);
-    int cmove1_end = AugmentCheckerMove(&cmoves[1], player, cmove1_start);
-
-    // check for 2 pieces hitting on the same point.
-    bool double_hit =
-        (cmoves[1].hit && cmoves[0].hit && cmove1_end == cmove0_end);
-
-    std::string returnVal = "";
-    if (cmove0_start == cmove1_start &&
-        cmove0_end == cmove1_end) {     // same move, show as (2).
-      if (cmoves[1].num == kPassPos) {  // Player can't move at all!
-        returnVal = "Pass";
-      } else {
-        returnVal = absl::StrCat(move_id, " - ",
-                                 PositionToStringHumanReadable(cmove0_start),
-                                 "/", PositionToStringHumanReadable(cmove0_end),
-                                 cmoves[0].hit ? "*" : "", "(2)");
-      }
-    } else if ((cmove0_start < cmove1_start ||
-                (cmove0_start == cmove1_start && cmove0_end < cmove1_end) ||
-                cmoves[0].num == kPassPos) &&
-               cmoves[1].num != kPassPos) {
-      // tradition to start with higher numbers first,
-      // so swap moves round if this not the case. If
-      // there is a pass move, put it last.
-      if (cmove1_end == cmove0_start) {
-        // Check to see if the same piece is moving for both
-        // moves, as this changes the format of the output.
-        returnVal = absl::StrCat(
-            move_id, " - ", PositionToStringHumanReadable(cmove1_start), "/",
-            PositionToStringHumanReadable(cmove1_end), cmoves[1].hit ? "*" : "",
-            "/", PositionToStringHumanReadable(cmove0_end),
-            cmoves[0].hit ? "*" : "");
-      } else {
-        returnVal = absl::StrCat(
-            move_id, " - ", PositionToStringHumanReadable(cmove1_start), "/",
-            PositionToStringHumanReadable(cmove1_end), cmoves[1].hit ? "*" : "",
-            " ",
-            (cmoves[0].num != kPassPos)
-                ? PositionToStringHumanReadable(cmove0_start)
-                : "",
-            (cmoves[0].num != kPassPos) ? "/" : "",
-            PositionToStringHumanReadable(cmove0_end),
-            (cmoves[0].hit && !double_hit) ? "*" : "");
-      }
-    } else {
-      if (cmove0_end == cmove1_start) {
-        // Check to see if the same piece is moving for both
-        // moves, as this changes the format of the output.
-        returnVal = absl::StrCat(
-            move_id, " - ", PositionToStringHumanReadable(cmove0_start), "/",
-            PositionToStringHumanReadable(cmove0_end), cmoves[0].hit ? "*" : "",
-            "/", PositionToStringHumanReadable(cmove1_end),
-            cmoves[1].hit ? "*" : "");
-      } else {
-        returnVal = absl::StrCat(
-            move_id, " - ", PositionToStringHumanReadable(cmove0_start), "/",
-            PositionToStringHumanReadable(cmove0_end), cmoves[0].hit ? "*" : "",
-            " ",
-            (cmoves[1].num != kPassPos)
-                ? PositionToStringHumanReadable(cmove1_start)
-                : "",
-            (cmoves[1].num != kPassPos) ? "/" : "",
-            PositionToStringHumanReadable(cmove1_end),
-            (cmoves[1].hit && !double_hit) ? "*" : "");
+    std::vector<CheckerMove> valid_moves;
+    for (const auto& move : cmoves) {
+      if (move.num != -1 && move.pos != kPassPos) {
+        valid_moves.push_back(move);
       }
     }
 
-    return returnVal;
+    if (valid_moves.empty() && !cmoves.empty()) {
+      return "Pass";
+    }
+
+    struct HumanMove {
+      int start_pos;
+      int end_pos;
+      bool hit;
+      int count;
+    };
+
+    std::vector<HumanMove> hmoves;
+    for (int i = 0; i < valid_moves.size(); ++i) {
+      CheckerMove temp_move = valid_moves[i];
+      int start_pos;
+      if (player == kOPlayerId) {
+        start_pos = (temp_move.pos == kBarPos ? kNumBarPosHumanReadable : temp_move.pos + 1);
+      } else {
+        start_pos = (temp_move.pos == kBarPos ? kNumBarPosHumanReadable : kNumPoints - temp_move.pos);
+      }
+      int end_pos = AugmentCheckerMove(&temp_move, player, start_pos);
+      
+      bool found = false;
+      for (auto& hm : hmoves) {
+        if (hm.start_pos == start_pos && hm.end_pos == end_pos && hm.hit == temp_move.hit) {
+          hm.count++;
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        hmoves.push_back({start_pos, end_pos, temp_move.hit, 1});
+      }
+    }
+
+    std::sort(hmoves.begin(), hmoves.end(), [](const HumanMove& a, const HumanMove& b) {
+      if (a.start_pos != b.start_pos) return a.start_pos > b.start_pos;
+      return a.end_pos > b.end_pos;
+    });
+
+    std::string result = absl::StrCat(move_id, " - ");
+    for (int i = 0; i < hmoves.size(); ++i) {
+      if (i > 0) absl::StrAppend(&result, " ");
+      absl::StrAppend(&result, PositionToStringHumanReadable(hmoves[i].start_pos), "/",
+                      PositionToStringHumanReadable(hmoves[i].end_pos));
+      if (hmoves[i].hit) absl::StrAppend(&result, "*");
+      if (hmoves[i].count > 1) absl::StrAppend(&result, "(", hmoves[i].count, ")");
+    }
+
+    if (cmoves.size() > valid_moves.size()) {
+       if (!valid_moves.empty()) {
+           absl::StrAppend(&result, " Pass");
+       } else {
+           result = "Pass";
+       }
+    }
+
+    return result;
   }
 }
 
@@ -455,12 +418,13 @@ void BackgammonState::DoApplyAction(Action move) {
 
   // Normal move action.
   std::vector<CheckerMove> moves = SpielMoveToCheckerMoves(cur_player_, move);
-  bool first_move_hit = ApplyCheckerMove(cur_player_, moves[0]);
-  bool second_move_hit = ApplyCheckerMove(cur_player_, moves[1]);
+  std::vector<bool> hits;
+  for (int i = 0; i < moves.size(); ++i) {
+    hits.push_back(ApplyCheckerMove(cur_player_, moves[i]));
+  }
 
   turn_history_info_.push_back(
-      TurnHistoryInfo(cur_player_, prev_player_, dice_, move, double_turn_,
-                      first_move_hit, second_move_hit));
+      TurnHistoryInfo(cur_player_, prev_player_, dice_, move, double_turn_, hits));
 
   if (!double_turn_) {
     turns_++;
@@ -489,11 +453,13 @@ void BackgammonState::UndoAction(int player, Action action) {
     double_turn_ = thi.double_turn;
     if (player != kChancePlayerId) {
       std::vector<CheckerMove> moves = SpielMoveToCheckerMoves(player, action);
-      SPIEL_CHECK_EQ(moves.size(), 2);
-      moves[0].hit = thi.first_move_hit;
-      moves[1].hit = thi.second_move_hit;
-      UndoCheckerMove(player, moves[1]);
-      UndoCheckerMove(player, moves[0]);
+      SPIEL_CHECK_EQ(moves.size(), thi.hits.size());
+      for (int i = 0; i < moves.size(); ++i) {
+        moves[i].hit = thi.hits[i];
+      }
+      for (int i = moves.size() - 1; i >= 0; --i) {
+        UndoCheckerMove(player, moves[i]);
+      }
       turns_--;
       if (!double_turn_) {
         if (player == kXPlayerId) {
@@ -535,37 +501,26 @@ Action BackgammonState::EncodedPassMove() const { return 25; }
 
 Action BackgammonState::CheckerMovesToSpielMove(
     const std::vector<CheckerMove>& moves) const {
-  SPIEL_CHECK_LE(moves.size(), 2);
-  int dig0 = EncodedPassMove();
-  int dig1 = EncodedPassMove();
+  SPIEL_CHECK_LE(moves.size(), 4);
   bool high_roll_first = false;
   int high_roll = DiceValue(0) >= DiceValue(1) ? DiceValue(0) : DiceValue(1);
 
-  if (!moves.empty()) {
-    int pos1 = moves[0].pos;
-    if (pos1 == kBarPos) {
-      pos1 = EncodedBarMove();
+  std::vector<int> digits(4, EncodedPassMove());
+
+  for (int i = 0; i < moves.size(); ++i) {
+    int pos = moves[i].pos;
+    if (pos == kBarPos) {
+      pos = EncodedBarMove();
     }
-    if (pos1 != kPassPos) {
-      int num1 = moves[0].num;
-      dig0 = pos1;
-      high_roll_first = num1 == high_roll;
+    if (pos != kPassPos) {
+      digits[i] = pos;
+      if (i == 0) high_roll_first = moves[i].num == high_roll;
     }
   }
 
-  if (moves.size() > 1) {
-    int pos2 = moves[1].pos;
-    if (pos2 == kBarPos) {
-      pos2 = EncodedBarMove();
-    }
-    if (pos2 != kPassPos) {
-      dig1 = pos2;
-    }
-  }
-
-  Action move = dig1 * 26 + dig0;
+  Action move = digits[0] + 26 * digits[1] + 676 * digits[2] + 17576 * digits[3];
   if (!high_roll_first) {
-    move += 676;  // 26**2
+    move += 456976;  // 26**4
   }
   SPIEL_CHECK_GE(move, 0);
   SPIEL_CHECK_LT(move, kNumDistinctActions);
@@ -577,25 +532,36 @@ std::vector<CheckerMove> BackgammonState::SpielMoveToCheckerMoves(
   SPIEL_CHECK_GE(spiel_move, 0);
   SPIEL_CHECK_LT(spiel_move, kNumDistinctActions);
 
-  bool high_roll_first = spiel_move < 676;
+  bool high_roll_first = spiel_move < 456976;
   if (!high_roll_first) {
-    spiel_move -= 676;
+    spiel_move -= 456976;
   }
 
-  std::vector<Action> digits = {spiel_move % 26, spiel_move / 26};
+  std::vector<Action> digits(4);
+  digits[0] = spiel_move % 26;
+  digits[1] = (spiel_move / 26) % 26;
+  digits[2] = (spiel_move / 676) % 26;
+  digits[3] = (spiel_move / 17576) % 26;
+
   std::vector<CheckerMove> cmoves;
+  int expected_moves = (!dice_.empty() && dice_[0] == dice_[1]) ? 4 : 2;
+
   int high_roll = DiceValue(0) >= DiceValue(1) ? DiceValue(0) : DiceValue(1);
   int low_roll = DiceValue(0) < DiceValue(1) ? DiceValue(0) : DiceValue(1);
 
-  for (int i = 0; i < 2; ++i) {
+  for (int i = 0; i < expected_moves; ++i) {
     SPIEL_CHECK_GE(digits[i], 0);
     SPIEL_CHECK_LE(digits[i], 25);
 
     int num = -1;
-    if (i == 0) {
-      num = high_roll_first ? high_roll : low_roll;
+    if (expected_moves == 4) {
+      num = dice_[0]; // Doublets all have same pip value.
     } else {
-      num = high_roll_first ? low_roll : high_roll;
+      if (i == 0) {
+        num = high_roll_first ? high_roll : low_roll;
+      } else {
+        num = high_roll_first ? low_roll : high_roll;
+      }
     }
     SPIEL_CHECK_GE(num, 1);
     SPIEL_CHECK_LE(num, 6);
@@ -614,7 +580,7 @@ std::vector<CheckerMove> BackgammonState::SpielMoveToCheckerMoves(
 std::vector<CheckerMove> BackgammonState::AugmentWithHitInfo(
     int player, const std::vector<CheckerMove>& cmoves) const {
   std::vector<CheckerMove> new_cmoves = cmoves;
-  for (int i = 0; i < 2; ++i) {
+  for (int i = 0; i < cmoves.size(); ++i) {
     new_cmoves[i].hit = IsHit(player, cmoves[i].pos, cmoves[i].num);
   }
   return new_cmoves;

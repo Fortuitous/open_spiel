@@ -65,12 +65,11 @@ inline constexpr const int kNumCheckersPerPlayer = 15;
 inline constexpr const int kBarPos = 100;
 inline constexpr const int kScorePos = 101;
 
-// The action encoding stores a number in { 0, 1, ..., 1351 }. If the high
-// roll is to move first, then the number is encoded as a 2-digit number in
-// base 26 ({0, 1, .., 23, kBarPos, Pass}) (=> first 676 numbers). Otherwise,
-// the low die is to move first and, 676 is subtracted and then again the
-// number is encoded as a 2-digit number in base 26.
-inline constexpr const int kNumDistinctActions = 1352;
+// The action encoding stores a number in { 0, 1, ..., 913951 }. 
+// Non-doublet actions use exactly 2 moves, but we pad it to a 4-digit number
+// in base 26 ({0, 1, .., 23, kBarPos, Pass}) (=> 456976 possibilities).
+// If the high roll moves first, we leave it. Otherwise we add 456976.
+inline constexpr const int kNumDistinctActions = 913952;
 
 // See ObservationTensorShape for details.
 inline constexpr const int kBoardEncodingSize = 4 * kNumPoints * kNumPlayers;
@@ -108,17 +107,15 @@ struct TurnHistoryInfo {
   std::vector<int> dice;
   Action action;
   bool double_turn;
-  bool first_move_hit;
-  bool second_move_hit;
+  std::vector<bool> hits;
   TurnHistoryInfo(int _player, int _prev_player, std::vector<int> _dice,
-                  int _action, bool _double_turn, bool fmh, bool smh)
+                  int _action, bool _double_turn, const std::vector<bool>& _hits)
       : player(_player),
         prev_player(_prev_player),
         dice(_dice),
         action(_action),
         double_turn(_double_turn),
-        first_move_hit(fmh),
-        second_move_hit(smh) {}
+        hits(_hits) {}
 };
 
 class BackgammonGame;

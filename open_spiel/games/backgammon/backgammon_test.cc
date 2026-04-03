@@ -472,7 +472,7 @@ void HumanReadableNotation() {
   std::cout << "First legal action" << std::endl;
   notation = bstate->ActionToString(kXPlayerId, legal_actions[0]);
   std::cout << notation << std::endl;
-  SPIEL_CHECK_EQ(notation, absl::StrCat(legal_actions[0], " - 24/18/13"));
+  SPIEL_CHECK_EQ(notation, absl::StrCat(legal_actions[0], " - 24/18 18/13"));
 
   // Check double move with hit
   bstate->SetState(
@@ -485,7 +485,7 @@ void HumanReadableNotation() {
   std::cout << "First legal action:" << std::endl;
   notation = bstate->ActionToString(kXPlayerId, legal_actions[0]);
   std::cout << notation << std::endl;
-  SPIEL_CHECK_EQ(notation, absl::StrCat(legal_actions[0], " - 24/18*/13"));
+  SPIEL_CHECK_EQ(notation, absl::StrCat(legal_actions[0], " - 24/18* 18/13"));
 
   // Check double move with double hit
   bstate->SetState(
@@ -498,7 +498,7 @@ void HumanReadableNotation() {
   std::cout << "First legal action:" << std::endl;
   notation = bstate->ActionToString(kXPlayerId, legal_actions[0]);
   std::cout << notation << std::endl;
-  SPIEL_CHECK_EQ(notation, absl::StrCat(legal_actions[0], " - 24/18*/13*"));
+  SPIEL_CHECK_EQ(notation, absl::StrCat(legal_actions[0], " - 24/18* 18/13*"));
 
   // Check ordinary move!
   bstate->SetState(
