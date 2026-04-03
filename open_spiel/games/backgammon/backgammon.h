@@ -75,7 +75,7 @@ inline constexpr const int kNumDistinctActions = 1352;
 // See ObservationTensorShape for details.
 inline constexpr const int kBoardEncodingSize = 4 * kNumPoints * kNumPlayers;
 inline constexpr const int kStateEncodingSize =
-    3 * kNumPlayers + kBoardEncodingSize + 2;
+    3 * kNumPlayers + kBoardEncodingSize + 6; // +2 for dice, +4 for moves remaining
 inline constexpr const char* kDefaultScoringType = "winloss_scoring";
 inline constexpr bool kDefaultHyperBackgammon = false;
 inline constexpr const int kDefaultMaxPlayerTurns = 500;
@@ -312,6 +312,7 @@ class BackgammonGame : public Game {
     // One double for whether it's the opponent's turn (1 or 0).
     // One double for the first dice's value.
     // One double for the second dice's value.
+    // Four doubles for the number of moves remaining (one-hot encoded 1 to 4).
 
     return {kStateEncodingSize};
   }

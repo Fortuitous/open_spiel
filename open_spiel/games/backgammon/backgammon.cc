@@ -316,6 +316,20 @@ void BackgammonState::ObservationTensor(Player player,
   *value_it++ = ((!dice_.empty()) ? dice_[0] : 0);
   *value_it++ = ((dice_.size() > 1) ? dice_[1] : 0);
 
+  int moves_remaining = 0;
+  if (!dice_.empty()) {
+    if (dice_.size() == 2 && dice_[0] == dice_[1]) {
+      moves_remaining = double_turn_ ? 2 : 4;
+    } else {
+      moves_remaining = 2;
+    }
+  }
+  
+  *value_it++ = (moves_remaining == 1 ? 1 : 0);
+  *value_it++ = (moves_remaining == 2 ? 1 : 0);
+  *value_it++ = (moves_remaining == 3 ? 1 : 0);
+  *value_it++ = (moves_remaining == 4 ? 1 : 0);
+
   SPIEL_CHECK_EQ(value_it, values.end());
 }
 
