@@ -473,33 +473,9 @@ void BackgammonState::DoApplyAction(Action move) {
 
   prev_player_ = cur_player_;
 
-  // Check for doubles.
-  bool extra_turn = false;
-  if (!double_turn_ && dice_[0] == dice_[1]) {
-    // Check the dice, and unuse them if they are used.
-    int dice_used = 0;
-    for (int i = 0; i < 2; i++) {
-      if (dice_[i] > 6) {
-        dice_[i] -= 6;
-        dice_used++;
-      }
-      SPIEL_CHECK_GE(dice_[i], 1);
-      SPIEL_CHECK_LE(dice_[i], 6);
-    }
-
-    if (dice_used == 2) {
-      extra_turn = true;
-    }
-  }
-
-  if (extra_turn) {
-    // Dice have been unused above.
-    double_turn_ = true;
-  } else {
-    cur_player_ = kChancePlayerId;
-    dice_.clear();
-    double_turn_ = false;
-  }
+  cur_player_ = kChancePlayerId;
+  dice_.clear();
+  double_turn_ = false;
 }
 
 void BackgammonState::UndoAction(int player, Action action) {
@@ -1067,7 +1043,7 @@ void BackgammonState::UndoCheckerMove(int player, const CheckerMove& move) {
 int BackgammonState::RecLegalMoves(
     std::vector<CheckerMove> moveseq,
     std::set<std::vector<CheckerMove>>* movelist) {
-  if (moveseq.size() == 2) {
+  if (moveseq.size() == (dice_[0] == dice_[1] ? 4 : 2)) {
     movelist->insert(moveseq);
     return moveseq.size();
   }
@@ -1158,7 +1134,7 @@ std::vector<Action> BackgammonState::LegalActions() const {
   std::set<std::vector<CheckerMove>> movelist;
   int max_moves = state->RecLegalMoves({}, &movelist);
   SPIEL_CHECK_GE(max_moves, 0);
-  SPIEL_CHECK_LE(max_moves, 2);
+  SPIEL_CHECK_LE(max_moves, 4);
   std::vector<Action> legal_actions = ProcessLegalMoves(max_moves, movelist);
   std::sort(legal_actions.begin(), legal_actions.end());
   return legal_actions;
