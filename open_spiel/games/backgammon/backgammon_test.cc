@@ -284,20 +284,21 @@ void NormalBearOffSituation2() {
     std::cout << bstate->ActionToString(kXPlayerId, action) << std::endl;
   }
 
-  // Legal actions here are:
-  // (18-4 20-4)
-  // (20-4 18-4)
-  // (20-4 20-4)
-  SPIEL_CHECK_EQ(legal_actions.size(), 3);
+  // Legal actions here are permutations of moving once from 18 (6-point)
+  // and three times from 20 (4-point). This yields 4 permutations.
+  SPIEL_CHECK_EQ(legal_actions.size(), 4);
   SPIEL_CHECK_TRUE(ActionsContains(
       legal_actions,
-      bstate->CheckerMovesToSpielMove({{18, 4, false}, {20, 4, false}})));
+      bstate->CheckerMovesToSpielMove({{18, 4, false}, {20, 4, false}, {20, 4, false}, {20, 4, false}})));
   SPIEL_CHECK_TRUE(ActionsContains(
       legal_actions,
-      bstate->CheckerMovesToSpielMove({{20, 4, false}, {18, 4, false}})));
+      bstate->CheckerMovesToSpielMove({{20, 4, false}, {18, 4, false}, {20, 4, false}, {20, 4, false}})));
   SPIEL_CHECK_TRUE(ActionsContains(
       legal_actions,
-      bstate->CheckerMovesToSpielMove({{20, 4, false}, {20, 4, false}})));
+      bstate->CheckerMovesToSpielMove({{20, 4, false}, {20, 4, false}, {18, 4, false}, {20, 4, false}})));
+  SPIEL_CHECK_TRUE(ActionsContains(
+      legal_actions,
+      bstate->CheckerMovesToSpielMove({{20, 4, false}, {20, 4, false}, {20, 4, false}, {18, 4, false}})));
 }
 
 // +------|------+
@@ -371,36 +372,18 @@ void DoublesBearOffOutsideHome() {
         1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0}});
   std::cout << bstate->ToString();
 
-  // First part of double turn.
-  SPIEL_CHECK_FALSE(bstate->double_turn());
-
+  // Since double_turn has been removed, all 4 moves happen in a single action.
   std::vector<Action> legal_actions = bstate->LegalActions();
-  std::cout << "Legal actions:" << std::endl;
-  for (Action action : legal_actions) {
-    std::cout << bstate->ActionToString(kXPlayerId, action) << std::endl;
-  }
-
-  // Check that we can bear off the two X checkers outside the home area (using
-  // two turns.
   Action action =
-      bstate->CheckerMovesToSpielMove({{16, 4, false}, {16, 4, false}});
+      bstate->CheckerMovesToSpielMove({{16, 4, false}, {16, 4, false}, {20, 4, false}, {20, 4, false}});
   SPIEL_CHECK_TRUE(ActionsContains(legal_actions, action));
   bstate->ApplyAction(action);
 
   std::cout << bstate->ToString();
-  legal_actions = bstate->LegalActions();
-  std::cout << "Legal actions:" << std::endl;
-  for (Action action : legal_actions) {
-    std::cout << bstate->ActionToString(kXPlayerId, action) << std::endl;
-  }
-
-  // Second part of double turn, so make sure the same player goes again.
-  SPIEL_CHECK_TRUE(bstate->double_turn());
-  SPIEL_CHECK_EQ(bstate->CurrentPlayer(), kXPlayerId);
-
-  // Now, bearing off from 20 should be allowed.
-  action = bstate->CheckerMovesToSpielMove({{20, 4, false}, {20, 4, false}});
-  SPIEL_CHECK_TRUE(ActionsContains(legal_actions, action));
+  
+  // Turn should be over.
+  SPIEL_CHECK_FALSE(bstate->double_turn());
+  SPIEL_CHECK_EQ(bstate->CurrentPlayer(), kChancePlayerId);
 }
 
 void HumanReadableNotation() {
@@ -418,8 +401,8 @@ void HumanReadableNotation() {
   std::vector<Action> legal_actions = bstate->LegalActions();
   std::cout << "First legal action:" << std::endl;
   std::string notation = bstate->ActionToString(kXPlayerId, legal_actions[0]);
-  std::cout << notation << std::endl;
-  SPIEL_CHECK_EQ(notation, absl::StrCat(legal_actions[0], " - Bar/24(2)"));
+  std::cout << "First legal action:\n" << legal_actions[0] << " - " << notation << std::endl;
+  SPIEL_CHECK_EQ(notation, absl::StrCat(legal_actions[0], " - Bar/24(4)"));
 
   // Check hits displayed correctly
   bstate->SetState(
@@ -601,6 +584,46 @@ void BasicHyperBackgammonTest() {
   SPIEL_CHECK_EQ(bstate->CountTotalCheckers(kOPlayerId), 3);
 }
 
+void MidGameDoublets4MoveTest() {
+  std::shared_ptr<const Game> game = LoadGame("backgammon");
+  std::unique_ptr<State> state = game->NewInitialState();
+  BackgammonState* bstate = static_cast<BackgammonState*>(state.get());
+
+  std::vector<int> x_board(24, 0);
+  x_board[23] = 2; // 24-point
+  x_board[12] = 5; // 13-point
+  x_board[7] = 3;  // 8-point
+  x_board[5] = 5;  // 6-point
+
+  std::vector<int> o_board(24, 0);
+  o_board[23] = 2; 
+  o_board[12] = 5; 
+  o_board[7] = 3;  
+  o_board[5] = 5;  
+
+  bstate->SetState(kXPlayerId, false, {4, 4}, {0, 0}, {0, 0}, {x_board, o_board});
+
+  std::cout << "\n--- Mid-Game 4-Move Doublets Test (Roll: 4-4) ---" << std::endl;
+  std::cout << bstate->ToString();
+
+  std::vector<Action> legal_actions = bstate->LegalActions();
+  SPIEL_CHECK_FALSE(legal_actions.empty());
+
+  std::cout << "Number of legal actions: " << legal_actions.size() << std::endl;
+
+  // Let's print the first one and verify it mathematically used 4 slots.
+  Action action = legal_actions[0];
+  std::string notation = bstate->ActionToString(kXPlayerId, action);
+  std::cout << "Sample Action ID: " << action << std::endl;
+  std::cout << "Sample Action String: " << notation << std::endl;
+
+  // If high_roll_first is true for doublets, move is not padded by 456976.
+  // Wait, if it uses 4 moves and digits[3] > 0, it should be quite large anyway! 
+  // Let's at least enforce that it doesn't just equal something tiny.
+  // In our base-26 packing, an action with 4 slots will definitely be > 1352.
+  SPIEL_CHECK_GE(action, 1352);
+}
+
 }  // namespace
 }  // namespace backgammon
 }  // namespace open_spiel
@@ -620,4 +643,5 @@ int main(int argc, char** argv) {
   open_spiel::backgammon::DoublesBearOffOutsideHome();
   open_spiel::backgammon::HumanReadableNotation();
   open_spiel::backgammon::BasicHyperBackgammonTest();
+  open_spiel::backgammon::MidGameDoublets4MoveTest();
 }

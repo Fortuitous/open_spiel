@@ -361,7 +361,11 @@ void BackgammonState::RollDice(int outcome) {
 
 void BackgammonState::SetDice(const std::vector<int>& dice) {
   dice_ = dice;
-  if (dice_[0] >= dice_[1]) {
+  if (dice_.size() > 0 && dice_[0] == dice_[1]) {
+    // For doublets, we actually have 4 dice to use!
+    dice_.push_back(dice_[0]);
+    dice_.push_back(dice_[0]);
+  } else if (dice_.size() > 1 && dice_[0] >= dice_[1]) {
     std::swap(dice_[0], dice_[1]);
   }
 }
@@ -386,7 +390,7 @@ void BackgammonState::DoApplyAction(Action move) {
   if (IsChanceNode()) {
     turn_history_info_.push_back(TurnHistoryInfo(kChancePlayerId, prev_player_,
                                                  dice_, move, double_turn_,
-                                                 false, false));
+                                                 std::vector<bool>{false, false}));
 
     if (turns_ == -1) {
       // The first chance node determines who goes first: X or O.
@@ -544,7 +548,7 @@ std::vector<CheckerMove> BackgammonState::SpielMoveToCheckerMoves(
   digits[3] = (spiel_move / 17576) % 26;
 
   std::vector<CheckerMove> cmoves;
-  int expected_moves = (!dice_.empty() && dice_[0] == dice_[1]) ? 4 : 2;
+  int expected_moves = (!dice_.empty() && DiceValue(0) == DiceValue(1)) ? 4 : 2;
 
   int high_roll = DiceValue(0) >= DiceValue(1) ? DiceValue(0) : DiceValue(1);
   int low_roll = DiceValue(0) < DiceValue(1) ? DiceValue(0) : DiceValue(1);
@@ -555,7 +559,7 @@ std::vector<CheckerMove> BackgammonState::SpielMoveToCheckerMoves(
 
     int num = -1;
     if (expected_moves == 4) {
-      num = dice_[0]; // Doublets all have same pip value.
+      num = DiceValue(0); // Doublets all have same pip value.
     } else {
       if (i == 0) {
         num = high_roll_first ? high_roll : low_roll;
@@ -930,7 +934,7 @@ bool BackgammonState::ApplyCheckerMove(int player, const CheckerMove& move) {
   }
 
   // Mark the die as used.
-  for (int i = 0; i < 2; ++i) {
+  for (int i = 0; i < dice_.size(); ++i) {
     if (dice_[i] == move.num) {
       dice_[i] += 6;
       break;
@@ -990,7 +994,7 @@ void BackgammonState::UndoCheckerMove(int player, const CheckerMove& move) {
   }
 
   // Mark the die as unused.
-  for (int i = 0; i < 2; ++i) {
+  for (int i = 0; i < dice_.size(); ++i) {
     if (dice_[i] == move.num + 6) {
       dice_[i] -= 6;
       break;
@@ -1005,11 +1009,11 @@ void BackgammonState::UndoCheckerMove(int player, const CheckerMove& move) {
   }
 }
 
-// Returns the maximum move size (2, 1, or 0)
+// Returns the maximum move size (4, 2, 1, or 0)
 int BackgammonState::RecLegalMoves(
     std::vector<CheckerMove> moveseq,
     std::set<std::vector<CheckerMove>>* movelist) {
-  if (moveseq.size() == (dice_[0] == dice_[1] ? 4 : 2)) {
+  if (moveseq.size() == (DiceValue(0) == DiceValue(1) ? 4 : 2)) {
     movelist->insert(moveseq);
     return moveseq.size();
   }
@@ -1041,41 +1045,30 @@ std::vector<Action> BackgammonState::ProcessLegalMoves(
     SPIEL_CHECK_TRUE(movelist.begin()->empty());
 
     // Passing is always a legal move!
-    return {CheckerMovesToSpielMove(
-        {{kPassPos, -1, false}, {kPassPos, -1, false}})};
+    int expected_moves = (!dice_.empty() && DiceValue(0) == DiceValue(1)) ? 4 : 2;
+    std::vector<CheckerMove> passes(expected_moves, CheckerMove(kPassPos, -1, false));
+    return {CheckerMovesToSpielMove(passes)};
   }
 
-  // Rule 2 in Movement of Checkers:
-  // A player must use both numbers of a roll if this is legally possible (or
-  // all four numbers of a double). When only one number can be played, the
-  // player must play that number. Or if either number can be played but not
-  // both, the player must play the larger one. When neither number can be used,
-  // the player loses his turn. In the case of doubles, when all four numbers
-  // cannot be played, the player must play as many numbers as he can.
-
-  // TODO(author5): below we filter out actions that are mapped to the same
-  // string representation as they have the same effect, even when applied in
-  // different orders. A better fix would be to remove the duplicate actions
-  // from the action space altogether.
   std::vector<Action> legal_actions;
   int max_roll = -1;
+  bool is_doublet = (!dice_.empty() && DiceValue(0) == DiceValue(1));
+
   for (const auto& move : movelist) {
-    if (max_moves == 2) {
-      // Only add moves that are size 2.
-      if (move.size() == 2) {
+    if (move.size() == max_moves) {
+      if (max_moves == 1 && !is_doublet) {
+        max_roll = std::max(max_roll, move[0].num);
+      } else {
         int action = CheckerMovesToSpielMove(move);
         legal_actions.push_back(action);
       }
-    } else if (max_moves == 1) {
-      // We are just finding the maximum roll.
-      max_roll = std::max(max_roll, move[0].num);
     }
   }
 
-  if (max_moves == 1) {
-    // Another round to add those that have the max die roll.
+  // If non-doublet and only 1 move could be played, we must play the larger die.
+  if (max_moves == 1 && !is_doublet) {
     for (const auto& move : movelist) {
-      if (move[0].num == max_roll) {
+      if (move.size() == max_moves && move[0].num == max_roll) {
         int action = CheckerMovesToSpielMove(move);
         legal_actions.push_back(action);
       }
