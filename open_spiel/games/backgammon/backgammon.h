@@ -124,7 +124,7 @@ class BackgammonState : public State {
  public:
   BackgammonState(const BackgammonState&) = default;
   BackgammonState(std::shared_ptr<const Game>, ScoringType scoring_type,
-                  bool hyper_backgammone);
+                  bool hyper_backgammon, bool dmp_only);
 
   Player CurrentPlayer() const override;
   void UndoAction(Player player, Action action) override;
@@ -248,6 +248,7 @@ class BackgammonState : public State {
 
   ScoringType scoring_type_;  // Which rules apply when scoring the game.
   bool hyper_backgammon_;     // Is the Hyper-backgammon variant enabled?
+  bool dmp_only_;             // Is Double Match Point (DMP) scoring enabled?
 
   Player cur_player_;
   Player prev_player_;
@@ -270,7 +271,7 @@ class BackgammonGame : public Game {
 
   std::unique_ptr<State> NewInitialState() const override {
     return std::unique_ptr<State>(new BackgammonState(
-        shared_from_this(), scoring_type_, hyper_backgammon_));
+        shared_from_this(), scoring_type_, hyper_backgammon_, dmp_only_));
   }
 
   // On the first turn there are 30 outcomes: 15 for each player (rolls without
@@ -320,6 +321,7 @@ class BackgammonGame : public Game {
  private:
   ScoringType scoring_type_;  // Which rules apply when scoring the game.
   bool hyper_backgammon_;     // Is hyper-backgammon variant enabled?
+  bool dmp_only_;             // Double Match Point scoring (1 win / -1 loss no matter gammon).
   const int max_player_turns_;
 };
 

@@ -72,6 +72,7 @@ const GameType kGameType{
     /*provides_observation_tensor=*/true,
     /*parameter_specification=*/
     {{"hyper_backgammon", GameParameter(kDefaultHyperBackgammon)},
+     {"dmp_only", GameParameter(false)},
      {"scoring_type",
       GameParameter(static_cast<std::string>(kDefaultScoringType))},
      {"max_player_turns", GameParameter(kDefaultMaxPlayerTurns)}}};
@@ -298,10 +299,11 @@ void BackgammonState::ObservationTensor(Player player,
 
 BackgammonState::BackgammonState(std::shared_ptr<const Game> game,
                                  ScoringType scoring_type,
-                                 bool hyper_backgammon)
+                                 bool hyper_backgammon, bool dmp_only)
     : State(game),
       scoring_type_(scoring_type),
       hyper_backgammon_(hyper_backgammon),
+      dmp_only_(dmp_only),
       cur_player_(kChancePlayerId),
       prev_player_(kChancePlayerId),
       turns_(-1),
@@ -1204,10 +1206,11 @@ bool BackgammonState::IsTerminal() const {
 std::vector<double> BackgammonState::Returns() const {
   int winner = -1;
   int loser = -1;
-  if (scores_[kXPlayerId] == 15) {
+  int num_checkers = NumCheckersPerPlayer(game_.get());
+  if (scores_[kXPlayerId] == num_checkers) {
     winner = kXPlayerId;
     loser = kOPlayerId;
-  } else if (scores_[kOPlayerId] == 15) {
+  } else if (scores_[kOPlayerId] == num_checkers) {
     winner = kOPlayerId;
     loser = kXPlayerId;
   } else {
@@ -1216,18 +1219,21 @@ std::vector<double> BackgammonState::Returns() const {
 
   // Magnify the util based on the scoring rules for this game.
   int util_mag = 1;
-  switch (scoring_type_) {
-    case ScoringType::kWinLossScoring:
-    default:
-      break;
+  
+  if (!dmp_only_) {
+    switch (scoring_type_) {
+      case ScoringType::kWinLossScoring:
+      default:
+        break;
 
-    case ScoringType::kEnableGammons:
-      util_mag = (IsGammoned(loser) ? 2 : 1);
-      break;
+      case ScoringType::kEnableGammons:
+        util_mag = (IsGammoned(loser) ? 2 : 1);
+        break;
 
-    case ScoringType::kFullScoring:
-      util_mag = (IsBackgammoned(loser) ? 3 : IsGammoned(loser) ? 2 : 1);
-      break;
+      case ScoringType::kFullScoring:
+        util_mag = (IsBackgammoned(loser) ? 3 : IsGammoned(loser) ? 2 : 1);
+        break;
+    }
   }
 
   std::vector<double> returns(kNumPlayers);
@@ -1263,10 +1269,15 @@ BackgammonGame::BackgammonGame(const GameParameters& params)
       scoring_type_(
           ParseScoringType(ParameterValue<std::string>("scoring_type"))),
       hyper_backgammon_(ParameterValue<bool>("hyper_backgammon")),
+      dmp_only_(ParameterValue<bool>("dmp_only", false)),
       max_player_turns_(ParameterValue<int>("max_player_turns",
                                             kDefaultMaxPlayerTurns)) {}
 
 double BackgammonGame::MaxUtility() const {
+  if (dmp_only_) {
+    return 1;
+  }
+
   if (hyper_backgammon_) {
     // We do not have the cube implemented, so Hyper-backgammon us currently
     // restricted to a win-loss game regardless of the scoring type.

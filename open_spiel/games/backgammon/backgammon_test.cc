@@ -624,6 +624,97 @@ void MidGameDoublets4MoveTest() {
   SPIEL_CHECK_GE(action, 1352);
 }
 
+void DMPVerificationTest() {
+  GameParameters params;
+  params["dmp_only"] = GameParameter(true);
+  std::shared_ptr<const Game> game = LoadGame("backgammon", params);
+  std::unique_ptr<State> state = game->NewInitialState();
+  BackgammonState* bstate = static_cast<BackgammonState*>(state.get());
+
+  std::vector<int> x_board(24, 0);
+  std::vector<int> o_board(24, 0);
+  x_board[23] = 1;
+  o_board[0] = 15;
+
+  // X has 14 scored and 1 checker on the board. O has 0 scored.
+  // This is a Gammon scenario.
+  bstate->SetState(kXPlayerId, false, {2, 1}, {0, 0}, {14, 0}, {x_board, o_board});
+
+  std::vector<Action> legal_actions = bstate->LegalActions();
+  SPIEL_CHECK_FALSE(legal_actions.empty());
+  
+  Action action = bstate->CheckerMovesToSpielMove({{23, 2, false}, {-1, -1, false}});
+  bstate->ApplyAction(action);
+
+  SPIEL_CHECK_TRUE(bstate->IsTerminal());
+
+  // Because dmp_only is true, returns must be strictly {1.0, -1.0} despite being a Gammon.
+  std::vector<double> returns = bstate->Returns();
+  SPIEL_CHECK_EQ(returns[0], 1.0);
+  SPIEL_CHECK_EQ(returns[1], -1.0);
+}
+
+void RegressionGammonTest() {
+  GameParameters params;
+  params["scoring_type"] = GameParameter(std::string("full_scoring"));
+  std::shared_ptr<const Game> game = LoadGame("backgammon", params);
+  std::unique_ptr<State> state = game->NewInitialState();
+  BackgammonState* bstate = static_cast<BackgammonState*>(state.get());
+
+  std::vector<int> x_board(24, 0);
+  std::vector<int> o_board(24, 0);
+  x_board[23] = 1;
+  o_board[0] = 15;
+
+  bstate->SetState(kXPlayerId, false, {2, 1}, {0, 0}, {14, 0}, {x_board, o_board});
+  Action action = bstate->CheckerMovesToSpielMove({{23, 2, false}, {-1, -1, false}});
+  bstate->ApplyAction(action);
+  SPIEL_CHECK_TRUE(bstate->IsTerminal());
+  std::vector<double> returns = bstate->Returns();
+  std::cout << "[Stress 1] Regression Gammon returns: {" << returns[0] << ", " << returns[1] << "}\n";
+  SPIEL_CHECK_EQ(returns[0], 2.0);
+  SPIEL_CHECK_EQ(returns[1], -2.0);
+}
+
+void DMPBackgammonTest() {
+  GameParameters params;
+  params["dmp_only"] = GameParameter(true);
+  std::shared_ptr<const Game> game = LoadGame("backgammon", params);
+  std::unique_ptr<State> state = game->NewInitialState();
+  BackgammonState* bstate = static_cast<BackgammonState*>(state.get());
+
+  std::vector<int> x_board(24, 0);
+  std::vector<int> o_board(24, 0);
+  x_board[23] = 1;
+  o_board[23] = 15; // In X's home board == Backgammon
+
+  bstate->SetState(kXPlayerId, false, {2, 1}, {0, 0}, {14, 0}, {x_board, o_board});
+  Action action = bstate->CheckerMovesToSpielMove({{23, 2, false}, {-1, -1, false}});
+  bstate->ApplyAction(action);
+  SPIEL_CHECK_TRUE(bstate->IsTerminal());
+  std::vector<double> returns = bstate->Returns();
+  std::cout << "[Stress 2] DMP Backgammon returns: {" << returns[0] << ", " << returns[1] << "}\n";
+  SPIEL_CHECK_EQ(returns[0], 1.0);
+  SPIEL_CHECK_EQ(returns[1], -1.0);
+}
+
+void TerminalLogicCheck() {
+  std::shared_ptr<const Game> game = LoadGame("backgammon");
+  std::unique_ptr<State> state = game->NewInitialState();
+  BackgammonState* bstate = static_cast<BackgammonState*>(state.get());
+  
+  std::vector<int> x_board(24, 0);
+  std::vector<int> o_board(24, 0);
+  x_board[23] = 1;
+  o_board[0] = 15;
+  bstate->SetState(kXPlayerId, false, {2, 1}, {0, 0}, {14, 0}, {x_board, o_board});
+  
+  SPIEL_CHECK_FALSE(bstate->IsTerminal());
+  bstate->ApplyAction(bstate->CheckerMovesToSpielMove({{23, 2, false}, {-1, -1, false}}));
+  SPIEL_CHECK_TRUE(bstate->IsTerminal());
+  std::cout << "[Stress 4] Terminal logic standard verified.\n";
+}
+
 }  // namespace
 }  // namespace backgammon
 }  // namespace open_spiel
@@ -644,4 +735,8 @@ int main(int argc, char** argv) {
   open_spiel::backgammon::HumanReadableNotation();
   open_spiel::backgammon::BasicHyperBackgammonTest();
   open_spiel::backgammon::MidGameDoublets4MoveTest();
+  open_spiel::backgammon::DMPVerificationTest();
+  open_spiel::backgammon::RegressionGammonTest();
+  open_spiel::backgammon::DMPBackgammonTest();
+  open_spiel::backgammon::TerminalLogicCheck();
 }
