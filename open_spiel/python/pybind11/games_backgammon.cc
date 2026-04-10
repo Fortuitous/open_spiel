@@ -14,6 +14,8 @@
 
 #include "open_spiel/python/pybind11/games_backgammon.h"
 
+#include <pybind11/stl.h>
+
 #include "open_spiel/games/backgammon/backgammon.h"
 #include "open_spiel/python/pybind11/pybind11.h"
 #include "open_spiel/spiel.h"
@@ -33,6 +35,7 @@ void open_spiel::init_pyspiel_games_backgammon(py::module& m) {
   py::classh<BackgammonState, State>(m, "BackgammonState")
       .def("augment_with_hit_info", &BackgammonState::AugmentWithHitInfo)
       .def("board", &BackgammonState::board)
+      .def("set_state", &BackgammonState::SetState)
       .def("checker_moves_to_spiel_move",
            &BackgammonState::CheckerMovesToSpielMove)
       .def("spiel_move_to_checker_moves",
