@@ -56,9 +56,9 @@ def parse_xgid(xgid_str):
         if c == '-':
             continue
         
-        # XGID point: index 1 is X's 24-point (OpenSpiel 0)
-        # index 24 is X's 1-point (OpenSpiel 23)
-        os_pos = i - 1  # 0 to 23
+        # XGID point: index 1 is X's 1-point (OpenSpiel 23)
+        # index 24 is X's 24-point (OpenSpiel 0)
+        os_pos = 24 - i  # 0 to 23
         
         if 'A' <= c <= 'Z':
             count = ord(c) - ord('A') + 1
@@ -130,7 +130,7 @@ def main():
     table = []
     
     for i in range(24):
-        abs_p = i if cur_player == 0 else 23 - i
+        abs_p = (23 - i) if cur_player == 0 else i
         
         self_raw = int(round(tensor[0, 0, i] * 15))
         self_blot = tensor[2, 0, i]
