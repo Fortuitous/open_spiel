@@ -624,12 +624,11 @@ void MidGameDoublets4MoveTest() {
   SPIEL_CHECK_GE(action, 1352);
 
   // Verification Assertion: Ensure the tensor properly reads 4 moves remaining
-  std::vector<float> obs_tensor(204);
+  std::vector<float> obs_tensor(984);
   bstate->ObservationTensor(kXPlayerId, absl::MakeSpan(obs_tensor));
-  // The moves_remaining logic is one-hot stacked at the very end of the tensor.
-  // 1 move: index 200, 2 moves: 201, 3 moves: 202, 4 moves: 203.
-  SPIEL_CHECK_EQ(obs_tensor[203], 1.0);
-  SPIEL_CHECK_EQ(obs_tensor[202], 0.0);
+  // The moves_remaining logic is now natively processed in Plane 19 across all 24 columns.
+  // 19 * 24 = 456
+  SPIEL_CHECK_EQ(obs_tensor[456], 1.0);
 }
 
 void DMPVerificationTest() {

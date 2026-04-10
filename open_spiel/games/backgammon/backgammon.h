@@ -73,8 +73,7 @@ inline constexpr const int kNumDistinctActions = 913952;
 
 // See ObservationTensorShape for details.
 inline constexpr const int kBoardEncodingSize = 4 * kNumPoints * kNumPlayers;
-inline constexpr const int kStateEncodingSize =
-    3 * kNumPlayers + kBoardEncodingSize + 6; // +2 for dice, +4 for moves remaining
+inline constexpr const int kStateEncodingSize = 984; // 41 planes * 1 * 24 points
 inline constexpr const char* kDefaultScoringType = "winloss_scoring";
 inline constexpr bool kDefaultHyperBackgammon = false;
 inline constexpr const int kDefaultMaxPlayerTurns = 500;
@@ -243,6 +242,12 @@ class BackgammonState : public State {
   std::set<CheckerMove> LegalCheckerMoves(int player) const;
   int RecLegalMoves(std::vector<CheckerMove> moveseq,
                     std::set<std::vector<CheckerMove>>* movelist);
+
+  int GetPrimeLength(Player player, int index) const;
+  float GetBlockadeDensity(Player player, int index) const;
+  int HomePointsMade(Player player) const;
+  bool HasContact() const;
+  int PipCount(Player player) const;
   std::vector<Action> ProcessLegalMoves(
       int max_moves, const std::set<std::vector<CheckerMove>>& movelist) const;
 
@@ -292,27 +297,7 @@ class BackgammonGame : public Game {
   double MaxUtility() const override;
 
   std::vector<int> ObservationTensorShape() const override {
-    // Encode each point on the board as four doubles:
-    // - One double for whether there is one checker or not (1 or 0).
-    // - One double for whether there are two checkers or not (1 or 0).
-    // - One double for whether there are three checkers or not (1 or 0).
-    // - One double if there are more than 3 checkers, the number of checkers.
-    //   more than three that are on that point.
-    //
-    // Return a vector encoding:
-    // Every point listed for the current player.
-    // Every point listed for the opponent.
-    // One double for the number of checkers on the bar for the current player.
-    // One double for the number of checkers scored for the current player.
-    // One double for whether it's the current player's turn (1 or 0).
-    // One double for the number of checkers on the bar for the opponent.
-    // One double for the number of checkers scored for the opponent.
-    // One double for whether it's the opponent's turn (1 or 0).
-    // One double for the first dice's value.
-    // One double for the second dice's value.
-    // Four doubles for the number of moves remaining (one-hot encoded 1 to 4).
-
-    return {kStateEncodingSize};
+    return {41, 1, 24};
   }
 
   int NumCheckersPerPlayer() const;

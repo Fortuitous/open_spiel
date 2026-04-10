@@ -28,6 +28,7 @@
 #include "open_spiel/game_parameters.h"
 #include "open_spiel/observer.h"
 #include "open_spiel/spiel.h"
+#include "open_spiel/utils/tensor_view.h"
 #include "open_spiel/spiel_globals.h"
 #include "open_spiel/spiel_utils.h"
 
@@ -249,45 +250,154 @@ void BackgammonState::ObservationTensor(Player player,
                                         absl::Span<float> values) const {
   SPIEL_CHECK_GE(player, 0);
   SPIEL_CHECK_LT(player, num_players_);
-
-  int opponent = Opponent(player);
   SPIEL_CHECK_EQ(values.size(), kStateEncodingSize);
-  auto value_it = values.begin();
-  // The format of this vector is described in Section 3.4 of "G. Tesauro,
-  // Practical issues in temporal-difference learning, 1994."
-  // https://link.springer.com/article/10.1007/BF00992697
-  // The values of the dice are added in the last two positions of the vector.
-  for (int count : board_[player]) {
-    *value_it++ = ((count == 1) ? 1 : 0);
-    *value_it++ = ((count == 2) ? 1 : 0);
-    *value_it++ = ((count == 3) ? 1 : 0);
-    *value_it++ = ((count > 3) ? (count - 3) : 0);
+
+  std::fill(values.begin(), values.end(), 0.0f);
+  open_spiel::TensorView<3> tensor(values, {41, 1, 24}, true);
+
+  bool contact = HasContact();
+  int my_pips = PipCount(player);
+  int opp_pips = PipCount(Opponent(player));
+  int moves_left = dice_.size(); 
+
+  auto norm_pip = [](int p) { return static_cast<float>(p) / 375.0f; };
+  auto norm_checkers = [](int c) { return static_cast<float>(c) / 15.0f; };
+
+  for (int i = 0; i < 24; ++i) {
+    int b = (player == kXPlayerId) ? i : (23 - i); // Absolute index
+
+    int my_count = board_[player][b];
+    int opp_count = board_[Opponent(player)][b];
+
+    bool is_mine = my_count > 0;
+    bool is_opp = opp_count > 0;
+    int count = is_mine ? my_count : opp_count;
+
+    // --- PERSISTENT PLANES (1-21) ---
+    if (is_mine) tensor[{0, 0, i}] = norm_checkers(count);
+    if (is_opp)  tensor[{1, 0, i}] = norm_checkers(count);
+
+    if (is_mine) {
+        int idx = std::min(count, 6);
+        tensor[{idx + 1, 0, i}] = 1.0f; 
+    } else if (is_opp) {
+        int idx = std::min(count, 6);
+        tensor[{idx + 7, 0, i}] = 1.0f;
+    }
+
+    tensor[{14, 0, i}] = norm_pip(my_pips);
+    tensor[{15, 0, i}] = norm_pip(opp_pips);
+    tensor[{16, 0, i}] = norm_pip(std::abs(my_pips - opp_pips));
+    tensor[{17, 0, i}] = norm_checkers(scores_[player]);
+    tensor[{18, 0, i}] = norm_checkers(scores_[Opponent(player)]);
+    tensor[{19, 0, i}] = static_cast<float>(moves_left) / 4.0f;
+    tensor[{20, 0, i}] = contact ? 1.0f : 0.0f;
+
+    // --- GATED TACTICAL PLANES (22-41) ---
+    if (contact) {
+      if (is_mine && i >= 21) tensor[{21, 0, i}] = 1.0f; // My Deep
+      if (is_opp  && i <= 2)  tensor[{22, 0, i}] = 1.0f; // Opp Deep
+      if (is_mine && i >= 17 && i <= 20) tensor[{23, 0, i}] = 1.0f; // My Adv
+      if (is_opp  && i >= 3 && i <= 6)   tensor[{24, 0, i}] = 1.0f; // Opp Adv
+
+      int s_len = GetPrimeLength(player, b);
+      if (s_len >= 2) {
+          for (int p = 0; p < std::min(s_len - 1, 5); ++p) 
+              tensor[{25 + p, 0, i}] = 1.0f;
+      }
+      
+      int o_len = GetPrimeLength(Opponent(player), b);
+      if (o_len >= 2) {
+          for (int p = 0; p < std::min(o_len - 1, 5); ++p) 
+              tensor[{30 + p, 0, i}] = 1.0f;
+      }
+
+      tensor[{35, 0, i}] = GetBlockadeDensity(player, b);
+      tensor[{36, 0, i}] = GetBlockadeDensity(Opponent(player), b);
+      tensor[{37, 0, i}] = norm_checkers(bar_[player]);
+      tensor[{38, 0, i}] = norm_checkers(bar_[Opponent(player)]);
+      tensor[{39, 0, i}] = static_cast<float>(HomePointsMade(player)) / 6.0f;
+      tensor[{40, 0, i}] = static_cast<float>(HomePointsMade(Opponent(player))) / 6.0f;
+    }
   }
-  for (int count : board_[opponent]) {
-    *value_it++ = ((count == 1) ? 1 : 0);
-    *value_it++ = ((count == 2) ? 1 : 0);
-    *value_it++ = ((count == 3) ? 1 : 0);
-    *value_it++ = ((count > 3) ? (count - 3) : 0);
+}
+
+int BackgammonState::GetPrimeLength(Player p, int index) const {
+  if (board_[p][index] < 2) return 0;
+  int length = 0;
+  int dir = (p == kXPlayerId) ? 1 : -1;
+  int curr = index;
+  while (curr >= 0 && curr < 24 && board_[p][curr] >= 2) {
+    length++;
+    curr += dir;
   }
-  *value_it++ = (bar_[player]);
-  *value_it++ = (scores_[player]);
-  *value_it++ = ((cur_player_ == player) ? 1 : 0);
+  return length;
+}
 
-  *value_it++ = (bar_[opponent]);
-  *value_it++ = (scores_[opponent]);
-  *value_it++ = ((cur_player_ == opponent) ? 1 : 0);
+float BackgammonState::GetBlockadeDensity(Player p, int index) const {
+  int dir = (p == kXPlayerId) ? 1 : -1;
+  int blocked_points = 0;
+  for (int step = 1; step <= 6; ++step) {
+    int pos = index + (dir * step);
+    if (pos >= 0 && pos < 24) {
+      if (board_[p][pos] >= 2) {
+        blocked_points++;
+      }
+    }
+  }
+  return static_cast<float>(blocked_points) / 6.0f;
+}
 
-  *value_it++ = ((!dice_.empty()) ? dice_[0] : 0);
-  *value_it++ = ((dice_.size() > 1) ? dice_[1] : 0);
+int BackgammonState::HomePointsMade(Player player) const {
+  int made = 0;
+  int start = (player == kXPlayerId) ? 18 : 0;
+  int end = (player == kXPlayerId) ? 23 : 5;
+  for (int i = start; i <= end; ++i) {
+    if (board_[player][i] >= 2) made++;
+  }
+  return made;
+}
 
-  int moves_remaining = dice_.size();
-  
-  *value_it++ = (moves_remaining == 1 ? 1 : 0);
-  *value_it++ = (moves_remaining == 2 ? 1 : 0);
-  *value_it++ = (moves_remaining == 3 ? 1 : 0);
-  *value_it++ = (moves_remaining == 4 ? 1 : 0);
+bool BackgammonState::HasContact() const {
+  int min_x = 24; 
+  if (bar_[kXPlayerId] > 0) {
+    min_x = -1;
+  } else {
+    for (int i = 0; i < 24; ++i) {
+      if (board_[kXPlayerId][i] > 0) {
+        min_x = i;
+        break;
+      }
+    }
+  }
 
-  SPIEL_CHECK_EQ(value_it, values.end());
+  int max_o = -1; 
+  if (bar_[kOPlayerId] > 0) {
+    max_o = 24;
+  } else {
+    for (int i = 23; i >= 0; --i) {
+      if (board_[kOPlayerId][i] > 0) {
+        max_o = i;
+        break;
+      }
+    }
+  }
+  return min_x <= max_o;
+}
+
+int BackgammonState::PipCount(Player player) const {
+  int pips = 0;
+  pips += bar_[player] * 25;
+  for (int i = 0; i < 24; ++i) {
+    if (board_[player][i] > 0) {
+      if (player == kXPlayerId) {
+        pips += board_[player][i] * (24 - i);
+      } else {
+        pips += board_[player][i] * (i + 1);
+      }
+    }
+  }
+  return pips;
 }
 
 BackgammonState::BackgammonState(std::shared_ptr<const Game> game,
