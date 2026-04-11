@@ -300,13 +300,13 @@ void BackgammonState::ObservationTensor(Player player,
       if (is_mine && i >= 17 && i <= 20) tensor[{23, 0, i}] = 1.0f; // My Adv
       if (is_opp  && i >= 3 && i <= 6)   tensor[{24, 0, i}] = 1.0f; // Opp Adv
 
-      int s_len = GetPrimeLength(player, player, i);
+      int s_len = GetPrimeLength(player, b);
       if (s_len >= 2) {
           for (int p = 0; p < std::min(s_len - 1, 5); ++p) 
               tensor[{25 + p, 0, i}] = 1.0f;
       }
       
-      int o_len = GetPrimeLength(player, Opponent(player), i);
+      int o_len = GetPrimeLength(Opponent(player), b);
       if (o_len >= 2) {
           for (int p = 0; p < std::min(o_len - 1, 5); ++p) 
               tensor[{30 + p, 0, i}] = 1.0f;
@@ -322,18 +322,13 @@ void BackgammonState::ObservationTensor(Player player,
   }
 }
 
-int BackgammonState::GetPrimeLength(Player perspective, Player p_check, int rel_i) const {
-  int length = 0;
-  int i = rel_i;
-  while (i >= 0 && i < 24) {
-    int b = (perspective == kXPlayerId) ? (23 - i) : i;
-    if (board_[p_check][b] >= 2) {
-      length++;
-      i--;  // Moving downward toward the 1-point (Home)
-    } else {
-      break;
-    }
-  }
+int BackgammonState::GetPrimeLength(Player p_check, int b) const {
+  if (board_[p_check][b] < 2) return 0;
+  int length = 1;
+  // Scan backward
+  for (int j = b - 1; j >= 0 && board_[p_check][j] >= 2; --j) length++;
+  // Scan forward
+  for (int j = b + 1; j < 24 && board_[p_check][j] >= 2; ++j) length++;
   return length;
 }
 
