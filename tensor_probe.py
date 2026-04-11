@@ -109,7 +109,9 @@ def main():
         sys.exit(1)
         
     tensor_list = state.observation_tensor(cur_player)
-    tensor = np.array(tensor_list).reshape(41, 1, 24)
+    planes = np.array(tensor_list[:888]).reshape(37, 1, 24)
+    scalars = tensor_list[888:]
+    tensor = planes
     
     if plane_target is not None:
         print(f"--- PLANE {plane_target} ---")
@@ -153,12 +155,24 @@ def main():
     print(tabulate(table, headers=headers))
     
     print(f"\n[ Group B: Global Scalars ]")
-    print(f"Pips (Self) : {my_pips} -> norm: {tensor[14, 0, 0]:.4f}")
-    print(f"Pips (Opp)  : {opp_pips} -> norm: {tensor[15, 0, 0]:.4f}")
-    print(f"Pip Lead    : {abs(my_pips - opp_pips)} -> norm: {tensor[16, 0, 0]:.4f}")
-    print(f"Off (Self)  : {scores[cur_player]} -> norm: {tensor[17, 0, 0]:.4f}")
-    print(f"Off (Opp)   : {scores[1 - cur_player]} -> norm: {tensor[18, 0, 0]:.4f}")
-    print(f"Moves Left  : {len(dice)} -> norm: {tensor[19, 0, 0]:.2f}")
+    print(f"Pips (Self) : {my_pips} -> norm: {scalars[0]:.4f}")
+    print(f"Pips (Opp)  : {opp_pips} -> norm: {scalars[1]:.4f}")
+    print(f"Pip Lead    : {abs(my_pips - opp_pips)} -> norm: {scalars[2]:.4f}")
+    print(f"Off (Self)  : {scores[cur_player]} -> norm: {scalars[3]:.4f}")
+    print(f"Off (Opp)   : {scores[1 - cur_player]} -> norm: {scalars[4]:.4f}")
+    print(f"Moves Left  : {len(dice)} -> norm: {scalars[5]:.2f}")
+    print(f"Home Strength (Self): {scalars[6]:.4f}")
+    print(f"Home Strength (Opp) : {scalars[7]:.4f}")
+    print(f"Bar Scalar (Self)   : {scalars[8]:.4f}")
+    print(f"Bar Scalar (Opp)    : {scalars[9]:.4f}")
+    print(f"Bar Binary 1 (Self) : {scalars[10]:.0f}")
+    print(f"Bar Binary 2 (Self) : {scalars[11]:.0f}")
+    print(f"Bar Binary 3 (Self) : {scalars[12]:.0f}")
+    print(f"Bar Binary 4+ (Self): {scalars[13]:.0f}")
+    print(f"Bar Binary 1 (Opp)  : {scalars[14]:.0f}")
+    print(f"Bar Binary 2 (Opp)  : {scalars[15]:.0f}")
+    print(f"Bar Binary 3 (Opp)  : {scalars[16]:.0f}")
+    print(f"Bar Binary 4+ (Opp) : {scalars[17]:.0f}")
     
     contact = tensor[20, 0, 0]
     
@@ -168,20 +182,22 @@ def main():
         print("*** GATED (Racing Mode) ***")
     else:
         print("*** ACTIVE (Contact Mode) ***")
-        headers_C = ["Rel Pt", "S Pr 2", "S Pr 3", "S Pr 4", "S Pr 5", "S Pr 6", "O Pr 2", "O Pr 3", "O Pr 4", "O Pr 5", "O Pr 6", "S BlkD", "O BlkD"]
-        table_c = []
-        for i in range(24):
-            table_c.append([
-                i,
-                tensor[25, 0, i], tensor[26, 0, i], tensor[27, 0, i], tensor[28, 0, i], tensor[29, 0, i],
-                tensor[30, 0, i], tensor[31, 0, i], tensor[32, 0, i], tensor[33, 0, i], tensor[34, 0, i],
-                tensor[35, 0, i], tensor[36, 0, i]
-            ])
-        print(tabulate(table_c, headers=headers_C))
+        
+    headers_C = ["Rel Pt", "S Pr 2", "S Pr 3", "S Pr 4", "S Pr 5", "S Pr 6", "O Pr 2", "O Pr 3", "O Pr 4", "O Pr 5", "O Pr 6", "S BlkD", "O BlkD", "S Deep", "O Deep", "S Adv", "O Adv"]
+    table_c = []
+    for i in range(24):
+        table_c.append([
+            i,
+            tensor[25, 0, i], tensor[26, 0, i], tensor[27, 0, i], tensor[28, 0, i], tensor[29, 0, i],
+            tensor[30, 0, i], tensor[31, 0, i], tensor[32, 0, i], tensor[33, 0, i], tensor[34, 0, i],
+            tensor[35, 0, i], tensor[36, 0, i],
+            tensor[21, 0, i], tensor[22, 0, i], tensor[23, 0, i], tensor[24, 0, i]
+        ])
+    print(tabulate(table_c, headers=headers_C))
         
     print("\n--- SANITY CHECKS ---")
     calc_pips = my_pips
-    tensor_pips = int(round(tensor[14, 0, 0] * 375.0))
+    tensor_pips = int(round(scalars[0] * 375.0))
     print(f"- Tensor Pips == XGID Pips? {tensor_pips} == {calc_pips} -> {'YES' if tensor_pips == calc_pips else 'NO'}")
     print(f"- Contact consistency passed? YES")
 

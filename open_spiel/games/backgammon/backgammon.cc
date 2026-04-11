@@ -253,7 +253,7 @@ void BackgammonState::ObservationTensor(Player player,
   SPIEL_CHECK_EQ(values.size(), kStateEncodingSize);
 
   std::fill(values.begin(), values.end(), 0.0f);
-  open_spiel::TensorView<3> tensor(values, {41, 1, 24}, true);
+  open_spiel::TensorView<3> tensor(absl::MakeSpan(values).subspan(0, 888), {37, 1, 24}, true);
 
   bool contact = HasContact();
   int my_pips = PipCount(player);
@@ -314,12 +314,31 @@ void BackgammonState::ObservationTensor(Player player,
 
       tensor[{35, 0, i}] = GetBlockadeDensity(player, player, i, 1);
       tensor[{36, 0, i}] = GetBlockadeDensity(player, Opponent(player), i, -1);
-      tensor[{37, 0, i}] = norm_checkers(bar_[player]);
-      tensor[{38, 0, i}] = norm_checkers(bar_[Opponent(player)]);
-      tensor[{39, 0, i}] = static_cast<float>(HomePointsMade(player)) / 6.0f;
-      tensor[{40, 0, i}] = static_cast<float>(HomePointsMade(Opponent(player))) / 6.0f;
     }
   }
+
+  // --- APPEND 18 GLOBAL SCALARS ---
+  values[888] = norm_pip(my_pips);
+  values[889] = norm_pip(opp_pips);
+  values[890] = norm_pip(std::abs(my_pips - opp_pips));
+  values[891] = norm_checkers(scores_[player]);
+  values[892] = norm_checkers(scores_[Opponent(player)]);
+  values[893] = static_cast<float>(moves_left) / 4.0f;
+  
+  values[894] = static_cast<float>(HomePointsMade(player)) / 6.0f;
+  values[895] = static_cast<float>(HomePointsMade(Opponent(player))) / 6.0f;
+  values[896] = norm_checkers(bar_[player]);
+  values[897] = norm_checkers(bar_[Opponent(player)]);
+
+  values[898] = (bar_[player] == 1) ? 1.0f : 0.0f;
+  values[899] = (bar_[player] == 2) ? 1.0f : 0.0f;
+  values[900] = (bar_[player] == 3) ? 1.0f : 0.0f;
+  values[901] = (bar_[player] >= 4) ? 1.0f : 0.0f;
+
+  values[902] = (bar_[Opponent(player)] == 1) ? 1.0f : 0.0f;
+  values[903] = (bar_[Opponent(player)] == 2) ? 1.0f : 0.0f;
+  values[904] = (bar_[Opponent(player)] == 3) ? 1.0f : 0.0f;
+  values[905] = (bar_[Opponent(player)] >= 4) ? 1.0f : 0.0f;
 }
 
 int BackgammonState::GetPrimeLength(Player p_check, int b) const {
@@ -463,7 +482,7 @@ void BackgammonState::RollDice(int outcome) {
 
 void BackgammonState::SetDice(const std::vector<int>& dice) {
   dice_ = dice;
-  if (dice_.size() > 0 && dice_[0] == dice_[1]) {
+  if (dice_.size() == 2 && dice_[0] == dice_[1]) {
     // For doublets, we actually have 4 dice to use!
     dice_.push_back(dice_[0]);
     dice_.push_back(dice_[0]);

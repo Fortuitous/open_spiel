@@ -73,7 +73,7 @@ inline constexpr const int kNumDistinctActions = 913952;
 
 // See ObservationTensorShape for details.
 inline constexpr const int kBoardEncodingSize = 4 * kNumPoints * kNumPlayers;
-inline constexpr const int kStateEncodingSize = 984; // 41 planes * 1 * 24 points
+inline constexpr const int kStateEncodingSize = 906; // 37 planes * 1 * 24 points + 18 global scalars
 inline constexpr const char* kDefaultScoringType = "winloss_scoring";
 inline constexpr bool kDefaultHyperBackgammon = false;
 inline constexpr const int kDefaultMaxPlayerTurns = 500;
@@ -297,7 +297,7 @@ class BackgammonGame : public Game {
   double MaxUtility() const override;
 
   std::vector<int> ObservationTensorShape() const override {
-    return {41, 1, 24};
+    return {906};
   }
 
   int NumCheckersPerPlayer() const;
