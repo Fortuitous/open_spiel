@@ -300,20 +300,20 @@ void BackgammonState::ObservationTensor(Player player,
       if (is_mine && i >= 17 && i <= 20) tensor[{23, 0, i}] = 1.0f; // My Adv
       if (is_opp  && i >= 3 && i <= 6)   tensor[{24, 0, i}] = 1.0f; // Opp Adv
 
-      int s_len = GetPrimeLength(player, b);
+      int s_len = GetPrimeLength(player, player, i);
       if (s_len >= 2) {
           for (int p = 0; p < std::min(s_len - 1, 5); ++p) 
               tensor[{25 + p, 0, i}] = 1.0f;
       }
       
-      int o_len = GetPrimeLength(Opponent(player), b);
+      int o_len = GetPrimeLength(player, Opponent(player), i);
       if (o_len >= 2) {
           for (int p = 0; p < std::min(o_len - 1, 5); ++p) 
               tensor[{30 + p, 0, i}] = 1.0f;
       }
 
-      tensor[{35, 0, i}] = GetBlockadeDensity(player, b);
-      tensor[{36, 0, i}] = GetBlockadeDensity(Opponent(player), b);
+      tensor[{35, 0, i}] = GetBlockadeDensity(player, player, i, 1);
+      tensor[{36, 0, i}] = GetBlockadeDensity(player, Opponent(player), i, -1);
       tensor[{37, 0, i}] = norm_checkers(bar_[player]);
       tensor[{38, 0, i}] = norm_checkers(bar_[Opponent(player)]);
       tensor[{39, 0, i}] = static_cast<float>(HomePointsMade(player)) / 6.0f;
@@ -322,25 +322,28 @@ void BackgammonState::ObservationTensor(Player player,
   }
 }
 
-int BackgammonState::GetPrimeLength(Player p, int b) const {
-  if (board_[p][b] < 2) return 0;
+int BackgammonState::GetPrimeLength(Player perspective, Player p_check, int rel_i) const {
   int length = 0;
-  int dir = (p == kXPlayerId) ? 1 : -1;
-  int curr = b;
-  while (curr >= 0 && curr < 24 && board_[p][curr] >= 2) {
-    length++;
-    curr += dir;
+  int i = rel_i;
+  while (i >= 0 && i < 24) {
+    int b = (perspective == kXPlayerId) ? (23 - i) : i;
+    if (board_[p_check][b] >= 2) {
+      length++;
+      i--;  // Moving downward toward the 1-point (Home)
+    } else {
+      break;
+    }
   }
   return length;
 }
 
-float BackgammonState::GetBlockadeDensity(Player p, int b) const {
-  int dir = (p == kXPlayerId) ? 1 : -1;
+float BackgammonState::GetBlockadeDensity(Player perspective, Player p_check, int rel_i, int r_dir) const {
   int blocked_points = 0;
   for (int step = 1; step <= 6; ++step) {
-    int pos = b + (dir * step);
+    int pos = rel_i + (r_dir * step);
     if (pos >= 0 && pos < 24) {
-      if (board_[p][pos] >= 2) {
+      int b = (perspective == kXPlayerId) ? (23 - pos) : pos;
+      if (board_[p_check][b] >= 2) {
         blocked_points++;
       }
     }
