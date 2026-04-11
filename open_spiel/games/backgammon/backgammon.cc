@@ -300,20 +300,20 @@ void BackgammonState::ObservationTensor(Player player,
       if (is_mine && i >= 17 && i <= 20) tensor[{23, 0, i}] = 1.0f; // My Adv
       if (is_opp  && i >= 3 && i <= 6)   tensor[{24, 0, i}] = 1.0f; // Opp Adv
 
-      int s_len = GetPrimeLength(player, i);
+      int s_len = GetPrimeLength(player, b);
       if (s_len >= 2) {
           for (int p = 0; p < std::min(s_len - 1, 5); ++p) 
               tensor[{25 + p, 0, i}] = 1.0f;
       }
       
-      int o_len = GetPrimeLength(Opponent(player), i);
+      int o_len = GetPrimeLength(Opponent(player), b);
       if (o_len >= 2) {
           for (int p = 0; p < std::min(o_len - 1, 5); ++p) 
               tensor[{30 + p, 0, i}] = 1.0f;
       }
 
-      tensor[{35, 0, i}] = GetBlockadeDensity(player, i);
-      tensor[{36, 0, i}] = GetBlockadeDensity(Opponent(player), i);
+      tensor[{35, 0, i}] = GetBlockadeDensity(player, b);
+      tensor[{36, 0, i}] = GetBlockadeDensity(Opponent(player), b);
       tensor[{37, 0, i}] = norm_checkers(bar_[player]);
       tensor[{38, 0, i}] = norm_checkers(bar_[Opponent(player)]);
       tensor[{39, 0, i}] = static_cast<float>(HomePointsMade(player)) / 6.0f;
@@ -322,25 +322,28 @@ void BackgammonState::ObservationTensor(Player player,
   }
 }
 
-int BackgammonState::GetPrimeLength(Player p, int relative_idx) const {
+int BackgammonState::GetPrimeLength(Player p, int b) const {
+  if (board_[p][b] < 2) return 0;
   int length = 0;
-  for (int step = 0; step < 24; ++step) {
-    int i = relative_idx + step;
-    if (i >= 24) break;
-    int b = (p == kXPlayerId) ? (23 - i) : i;
-    if (board_[p][b] >= 2) length++;
-    else break;
+  int dir = (p == kXPlayerId) ? 1 : -1;
+  int curr = b;
+  while (curr >= 0 && curr < 24 && board_[p][curr] >= 2) {
+    length++;
+    curr += dir;
   }
   return length;
 }
 
-float BackgammonState::GetBlockadeDensity(Player p, int relative_idx) const {
+float BackgammonState::GetBlockadeDensity(Player p, int b) const {
+  int dir = (p == kXPlayerId) ? 1 : -1;
   int blocked_points = 0;
   for (int step = 1; step <= 6; ++step) {
-    int i = relative_idx + step;
-    if (i >= 24) break;
-    int b = (p == kXPlayerId) ? (23 - i) : i;
-    if (board_[p][b] >= 2) blocked_points++;
+    int pos = b + (dir * step);
+    if (pos >= 0 && pos < 24) {
+      if (board_[p][pos] >= 2) {
+        blocked_points++;
+      }
+    }
   }
   return static_cast<float>(blocked_points) / 6.0f;
 }

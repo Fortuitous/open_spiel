@@ -243,8 +243,8 @@ class BackgammonState : public State {
   int RecLegalMoves(std::vector<CheckerMove> moveseq,
                     std::set<std::vector<CheckerMove>>* movelist);
 
-  int GetPrimeLength(Player player, int relative_index) const;
-  float GetBlockadeDensity(Player player, int relative_index) const;
+  int GetPrimeLength(Player player, int b) const;
+  float GetBlockadeDensity(Player player, int b) const;
   int HomePointsMade(Player player) const;
   bool HasContact() const;
   int PipCount(Player player) const;
