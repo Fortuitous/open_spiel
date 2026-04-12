@@ -41,7 +41,8 @@ class ExpertEyesNet(nn.Module):
         # Policy Head (Move Selection)
         self.policy_conv = nn.Conv2d(num_filters, 2, kernel_size=1, bias=False)
         self.policy_bn = nn.BatchNorm2d(2)
-        self.policy_fc = nn.Linear(2 * 24 + 18, 400) 
+        # OpenSpiel's game.num_distinct_actions() = 913952
+        self.policy_fc = nn.Linear(2 * 24 + 18, 913952) 
 
     def forward(self, x_flat):
         # x_flat is [Batch, 906]
