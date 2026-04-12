@@ -69,3 +69,14 @@ open_spiel/.vs
 
 # Editor swap files
 *.swp
+
+# Backgammon Training Artifacts
+*.pt
+*.pt_data
+*_xg.txt
+training_*.log
+smoke_test_*
+mcts_analysis.txt
+
+# Environment
+venv/

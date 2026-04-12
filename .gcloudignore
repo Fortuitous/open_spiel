@@ -1,0 +1,15 @@
+.gcloudignore
+.git
+.gitignore
+venv/
+*.pt
+*.pt_data
+# Ignore game logs but keep requirements.txt and other metadata
+*_xg.txt
+*.mat
+*.log
+build/
+dist/
+*.egg-info
+.pytest_cache/
+__pycache__/
