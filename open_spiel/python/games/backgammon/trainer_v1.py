@@ -16,6 +16,10 @@ import time
 import shutil
 import glob
 from google.cloud import storage
+try:
+    import wandb
+except ImportError:
+    wandb = None
 
 from open_spiel.python.algorithms import mcts
 from open_spiel.python.games.backgammon.expert_eyes_model import ExpertEyesNet
@@ -35,6 +39,9 @@ class GCSHelper:
         blob = self.bucket.blob(remote_path)
         blob.upload_from_filename(local_path)
         print_flush(f"Uploaded {local_path} to gs://{self.bucket.name}/{remote_path}")
+
+    def exists(self, remote_path):
+        return self.bucket.blob(remote_path).exists()
 
     def download_file(self, remote_path, local_path):
         blob = self.bucket.blob(remote_path)
@@ -253,7 +260,7 @@ def train_iteration(gen_id, gcs, num_steps=200):
     latest_path = "checkpoints/latest.pt"
     local_latest = "latest_downloaded.pt"
     if gcs.download_file(latest_path, local_latest):
-        model.load_state_dict(torch.load(local_latest))
+        model.load_state_dict(torch.load(local_latest, weights_only=False))
         print_flush(f"Fine-tuning from gs://{gcs.bucket.name}/{latest_path}")
     else:
         print_flush("No latest checkpoint found. Starting from SCRATCH (Ensure this is intended).")
@@ -271,7 +278,7 @@ def train_iteration(gen_id, gcs, num_steps=200):
         # [Wait] The original trainer returned list of (obs, pi, z). 
         # We need to save that to GCS as well. I'll update the 'play' mode to save .pt data.
         if local_log.endswith(".pt_data"):
-            game_data = torch.load(local_log)
+            game_data = torch.load(local_log, weights_only=False)
             for d in game_data:
                 buffer.append(d)
 
@@ -303,6 +310,14 @@ def train_iteration(gen_id, gcs, num_steps=200):
         
         if (step + 1) % 50 == 0:
             print_flush(f"  [Step {step+1:03}] V_Loss: {v_loss.item():.4f} | P_Loss: {p_loss.item():.4f}")
+            if wandb and wandb.run:
+                wandb.log({
+                    "train/step": step + 1,
+                    "train/v_loss": v_loss.item(),
+                    "train/p_loss": p_loss.item(),
+                    "train/total_loss": loss.item(),
+                    "train/learning_rate": optimizer.param_groups[0]['lr']
+                })
 
     # Save and upload
     gen_ckpt = f"expert_eyes_gen_{gen_id}.pt"
@@ -324,7 +339,7 @@ def play_mode(gcs, num_games=10, max_sims=400):
     
     local_latest = "latest_worker.pt"
     if gcs.download_file("checkpoints/latest.pt", local_latest):
-        model.load_state_dict(torch.load(local_latest))
+        model.load_state_dict(torch.load(local_latest, weights_only=False))
         print_flush("Loaded latest checkpoint from GCS.")
     else:
         print_flush("ERROR: No latest.pt found on GCS! Run with --mode init_scratch first.")
@@ -333,12 +348,21 @@ def play_mode(gcs, num_games=10, max_sims=400):
     model.eval()
     evaluator = ExpertEyesEvaluator(model)
     
+    # Resilience IDs: Use command line arg -> Environment variable -> Default
+    job_id = args.job_id or os.environ.get("CLOUD_ML_JOB_ID", str(int(time.time())))
+    worker_id = args.worker_id or os.environ.get("CLOUD_ML_TASK_ID", "0")
+    
     for g in range(num_games):
-        timestamp = int(time.time() * 1000)
-        xg_filename = f"game_{timestamp}_{g+1}_xg.txt"
-        data_filename = f"game_{timestamp}_{g+1}.pt_data"
+        # Pattern: game_{job_id}_w{worker_id}_{index}
+        xg_filename = f"game_{job_id}_w{worker_id}_{g+1}_xg.txt"
+        data_filename = f"game_{job_id}_w{worker_id}_{g+1}.pt_data"
         
-        print_flush(f"  Playing Game {g+1}/{num_games}...")
+        # Check if this specific game already exists in GCS
+        if gcs.exists(f"logs/{xg_filename}"):
+            print_flush(f"  Game {g+1}/{num_games} (Worker {worker_id}) already exists in GCS. Skipping.")
+            continue
+            
+        print_flush(f"  Playing Game {g+1}/{num_games} (Worker {worker_id})...")
         game_data = play_training_game(game, model, evaluator, write_xg=True, xg_filename=xg_filename, max_sims=max_sims)
         
         # Save raw data for trainer
@@ -351,6 +375,15 @@ def play_mode(gcs, num_games=10, max_sims=400):
         # Local Cleanup
         os.remove(xg_filename)
         os.remove(data_filename)
+
+        if wandb and wandb.run:
+            # Game stats
+            returns = game_data[0][2] if game_data else 0 # z from first entry (terminal return)
+            wandb.log({
+                "play/game_length": len(game_data),
+                "play/game_result": returns, # +1 or -1
+                "play/generation": gcs.get_latest_checkpoint_info()
+            })
         
     print_flush("Play session complete.")
 
@@ -371,8 +404,44 @@ if __name__ == "__main__":
     parser.add_argument("--num_games", type=int, default=10, help="Number of games to play in 'play' mode")
     parser.add_argument("--sims", type=int, default=400, help="MCTS simulations per move")
     parser.add_argument("--steps", type=int, default=200, help="Optimization steps in 'train' mode")
+    parser.add_argument("--wandb", action="store_true", help="Explicit toggle for W&B telemetry")
+    parser.add_argument("--job_id", type=str, default=None, help="Explicit Job ID for resumption testing")
+    parser.add_argument("--worker_id", type=str, default=None, help="Explicit Worker ID for resumption testing")
     args = parser.parse_args()
     
+    # W&B Logic
+    if args.wandb and wandb and os.environ.get("WANDB_API_KEY"):
+        print_flush("W&B API Key detected. Initializing telemetry...")
+        wandb.login(key=os.environ.get("WANDB_API_KEY"))
+        
+        # Determine Gen for run naming
+        gcs = GCSHelper(args.bucket_name)
+        current_gen = gcs.get_latest_checkpoint_info()
+        run_name = f"gen_{current_gen}_{args.mode}_{int(time.time())}"
+        
+        # Auto-config architecture
+        temp_model = ExpertEyesNet(num_res_blocks=20, num_filters=256)
+        config = {
+            "mode": args.mode,
+            "resnet_blocks": 20,
+            "filters": 256,
+            "mcts_sims": args.sims,
+            "learning_rate": 0.01,
+            "batch_size": 128,
+            "architecture": str(temp_model)
+        }
+        
+        job_id = os.environ.get("CLOUD_ML_JOB_ID", str(int(time.time())))
+        wandb.init(
+            project="expert-eyes-backgammon",
+            name=run_name,
+            id=job_id,
+            resume="allow",
+            config=config
+        )
+    else:
+        print_flush("W&B API Key NOT found. Telemetry disabled.")
+
     gcs = GCSHelper(args.bucket_name)
     
     if args.mode == "init_scratch":
