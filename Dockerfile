@@ -1,5 +1,5 @@
-# Use Python 3.12 slim for compatibility (OpenSpiel requires >=3.11)
-FROM python:3.12-slim
+# Use a PyTorch CUDA runtime with Python >= 3.11 for OpenSpiel compatibility
+FROM pytorch/pytorch:2.4.0-cuda12.1-cudnn9-runtime
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
@@ -18,24 +18,24 @@ RUN apt-get update && apt-get install -y \
 # Set the working directory
 WORKDIR /app
 
-# Copy the entire source tree to the container
+# Install core Python dependencies (Cached layer)
+# Note: Torch is already included in the base image
+RUN pip install --no-cache-dir google-cloud-storage wandb
+
+# Install OpenSpiel from local source
+# We do this FIRST to cache the heavy C++ compilation
 COPY . .
-
-# Install Python dependencies
-# Note: We install torch first to ensure it's prioritized
-RUN pip install --no-cache-dir torch google-cloud-storage
-
-# Install OpenSpiel from local source to ensure C++ modifications are included
 RUN pip install .
 
-# Patch trainer_v1.py to remove local absolute paths and fix imports
-# The script is located at open_spiel/python/games/backgammon/trainer_v1.py
-# We will move it to the root of /app for easier execution
-RUN cp open_spiel/python/games/backgammon/trainer_v1.py /app/trainer_v1.py && \
-    cp open_spiel/python/games/backgammon/expert_eyes_model.py /app/expert_eyes_model.py && \
-    sed -i '/sys.path.append("\/home\/jeremy\/projects\/open_spiel")/d' /app/trainer_v1.py && \
+# Copy the specific trainer scripts LAST
+# This ensures that any changes to these files result in a near-instant rebuild
+COPY open_spiel/python/games/backgammon/trainer_v1.py /app/trainer_v1.py
+COPY open_spiel/python/games/backgammon/expert_eyes_model.py /app/expert_eyes_model.py
+
+# Patch the local paths in the scripts
+RUN sed -i '/sys.path.append("\/home\/jeremy\/projects\/open_spiel")/d' /app/trainer_v1.py && \
     sed -i '/sys.path.append("\/home\/jeremy\/projects\/open_spiel\/build\/python")/d' /app/trainer_v1.py && \
     sed -i 's/from open_spiel.python.games.backgammon.expert_eyes_model import ExpertEyesNet/from expert_eyes_model import ExpertEyesNet/g' /app/trainer_v1.py
 
-# Set the entrypoint to run the trainer
+# Set the entrypoint
 ENTRYPOINT ["python3", "/app/trainer_v1.py"]

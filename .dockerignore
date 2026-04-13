@@ -1,0 +1,31 @@
+# Metadata
+.git
+.gitignore
+.gcloudignore
+.dockerignore
+
+# Build products
+build/
+dist/
+*.egg-info
+__pycache__/
+*.pyc
+
+# Virtual Environment
+venv/
+
+# Training Artifacts
+*.pt
+*.pt_data
+*_xg.txt
+*.mat
+*.log
+smoke_test_*
+
+# Scratch
+Testing/
+tmp_training/
+
+# Frequently edited scripts (Ignored for C++ layer cache preservation)
+# NOTE: Removed from here because the Dockerfile needs to COPY them explicitly.
+# To avoid busting the C++ cache, ensure these are copied LAST in the Dockerfile.
