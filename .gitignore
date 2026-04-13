@@ -80,3 +80,5 @@ mcts_analysis.txt
 
 # Environment
 venv/
+Testing/
+connection_test.txt
