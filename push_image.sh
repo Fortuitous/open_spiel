@@ -8,8 +8,8 @@ PROJECT_ID="expert-eyes-training-742"
 REPO_NAME="expert-eyes-repo"
 LOCATION="us-central1"
 IMAGE_NAME="trainer"
-TAG="v2"
-FULL_IMAGE_NAME="${LOCATION}-docker.pkg.dev/${PROJECT_ID}/${REPO_NAME}/${IMAGE_NAME}:${TAG}"
+IMAGE_TAG="v7"
+FULL_IMAGE_NAME="${LOCATION}-docker.pkg.dev/${PROJECT_ID}/${REPO_NAME}/${IMAGE_NAME}:${IMAGE_TAG}"
 
 # Ensure gcloud is in the PATH (found in /home/jeremy/google-cloud-sdk/bin)
 export PATH="/home/jeremy/google-cloud-sdk/bin:$PATH"

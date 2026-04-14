@@ -22,13 +22,17 @@ WORKDIR /app
 # Note: Torch is already included in the base image
 RUN pip install --no-cache-dir google-cloud-storage wandb
 
-# Install OpenSpiel from local source
-# We do this FIRST to cache the heavy C++ compilation
-COPY . .
+# Install OpenSpiel dependencies first
+COPY setup.py MANIFEST.in requirements.txt README.md /app/
+COPY open_spiel /app/open_spiel
+COPY pybind11 /app/pybind11
+
+# Build and install OpenSpiel
+# This is the heavy layer that will be cached if the above files don't change
 RUN pip install .
 
 # Copy the specific trainer scripts LAST
-# This ensures that any changes to these files result in a near-instant rebuild
+# These are the files we edit frequently; copying them here ensures near-instant rebuilds
 COPY open_spiel/python/games/backgammon/trainer_v1.py /app/trainer_v1.py
 COPY open_spiel/python/games/backgammon/expert_eyes_model.py /app/expert_eyes_model.py
 

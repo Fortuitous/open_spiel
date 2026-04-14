@@ -15,6 +15,8 @@ import signal
 import time
 import shutil
 import glob
+import json
+import traceback
 from google.cloud import storage
 try:
     import wandb
@@ -25,6 +27,9 @@ from open_spiel.python.algorithms import mcts
 from open_spiel.python.games.backgammon.expert_eyes_model import ExpertEyesNet
 
 NUM_DISTINCT_ACTIONS = 913952
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+RES_BLOCKS = 20
+FILTERS = 256
 
 # Ensure prints are flushed immediately for cloud logging
 def print_flush(msg):
@@ -75,9 +80,10 @@ class GCSHelper:
         gen_numbers = []
         for b in blobs:
             try:
-                # expert_eyes_gen_N.pt
-                parts = b.name.split("/")[-1].split("_")
-                if len(parts) >= 4:
+                # checkpoints/expert_eyes_gen_N.pt or checkpoints/periodic/gen_N_...
+                name = b.name.split("/")[-1]
+                if "gen_" in name:
+                    parts = name.split("_")
                     gen_id = int(parts[3].split(".")[0])
                     gen_numbers.append(gen_id)
             except (IndexError, ValueError):
@@ -114,7 +120,7 @@ class ExpertEyesEvaluator(mcts.Evaluator):
             return np.zeros(2)
             
         obs_tensor = state.observation_tensor()
-        tensor_input = torch.FloatTensor(obs_tensor).unsqueeze(0)
+        tensor_input = torch.FloatTensor(obs_tensor).unsqueeze(0).to(DEVICE)
         with torch.no_grad():
             _, value = self.model(tensor_input)
             
@@ -245,39 +251,36 @@ def signal_handler(sig, frame):
 signal.signal(signal.SIGTERM, signal_handler)
 signal.signal(signal.SIGINT, signal_handler)
 
-def train_iteration(gen_id, gcs, num_steps=200):
+def train_iteration(gen_id, gcs, num_steps=200, lr=0.01, batch_size=128):
     print_flush(f"=== Starting Training Iteration (New Gen: {gen_id}) ===")
+    print_flush(f"Using Hyperparams: LR={lr}, Batch={batch_size}, Steps={num_steps}")
     
     tmp_dir = "./tmp_training"
     if os.path.exists(tmp_dir):
         shutil.rmtree(tmp_dir)
     os.makedirs(tmp_dir)
     
-    # Scale: 20 blocks, 256 filters
-    model = ExpertEyesNet(num_res_blocks=20, num_filters=256)
+    # Scale: Global constants
+    model = ExpertEyesNet(num_res_blocks=RES_BLOCKS, num_filters=FILTERS).to(DEVICE)
     
     # Download latest model from GCS
     latest_path = "checkpoints/latest.pt"
     local_latest = "latest_downloaded.pt"
     if gcs.download_file(latest_path, local_latest):
-        model.load_state_dict(torch.load(local_latest, weights_only=False))
+        model.load_state_dict(torch.load(local_latest, map_location=DEVICE, weights_only=False))
         print_flush(f"Fine-tuning from gs://{gcs.bucket.name}/{latest_path}")
     else:
-        print_flush("No latest checkpoint found. Starting from SCRATCH (Ensure this is intended).")
+        print_flush("No latest checkpoint found. Starting from SCRATCH.")
     
-    # Download 1000 most recent logs
-    print_flush("Downloading sliding window of 1000 logs from GCS...")
+    # Download modern logs
+    print_flush("Downloading sliding window of 1000 logs from GCS (Gen 0, 1, 2)...")
     blobs = gcs.list_recent_logs(limit=1000)
     buffer = ReplayBuffer(capacity=100000)
     
     for blob in blobs:
-        local_log = os.path.join(tmp_dir, blob.name.split("/")[-1])
-        blob.download_to_filename(local_log)
-        # Parse log (This assumes we can reconstruct data from XG logs or we save raw data)
-        # For simplicity, we assume the trainer saves .pt data or we need a raw format.
-        # [Wait] The original trainer returned list of (obs, pi, z). 
-        # We need to save that to GCS as well. I'll update the 'play' mode to save .pt data.
-        if local_log.endswith(".pt_data"):
+        if blob.name.endswith(".pt_data"):
+            local_log = os.path.join(tmp_dir, blob.name.split("/")[-1])
+            blob.download_to_filename(local_log)
             game_data = torch.load(local_log, weights_only=False)
             for d in game_data:
                 buffer.append(d)
@@ -287,29 +290,38 @@ def train_iteration(gen_id, gcs, num_steps=200):
         print_flush("ERROR: No data found for training!")
         return
 
-    optimizer = optim.Adam(model.parameters(), lr=0.01, weight_decay=1e-4)
+    optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=1e-4)
+    scaler = torch.cuda.amp.GradScaler()
     model.train()
-    batch_size = 128
+    
     actual_batch_size = min(batch_size, len(buffer))
     
     for step in range(num_steps):
         batch = buffer.sample(actual_batch_size)
-        obs_batch = torch.FloatTensor(np.array([x[0] for x in batch]))
-        pi_batch = torch.FloatTensor(np.array([x[1] for x in batch]))
-        z_batch = torch.FloatTensor(np.array([x[2] for x in batch])).unsqueeze(1)
+        obs_batch = torch.FloatTensor(np.array([x[0] for x in batch])).to(DEVICE)
+        pi_batch = torch.FloatTensor(np.array([x[1] for x in batch])).to(DEVICE)
+        z_batch = torch.FloatTensor(np.array([x[2] for x in batch])).unsqueeze(1).to(DEVICE)
         
         optimizer.zero_grad()
-        p_logits, v_pred = model(obs_batch)
-        v_loss = F.mse_loss(v_pred, z_batch)
-        log_p = F.log_softmax(p_logits, dim=1)
-        p_loss = -torch.mean(torch.sum(pi_batch * log_p, dim=1))
         
-        loss = v_loss + p_loss
-        loss.backward()
-        optimizer.step()
+        with torch.cuda.amp.autocast():
+            p_logits, v_pred = model(obs_batch)
+            v_loss = F.mse_loss(v_pred, z_batch)
+            log_p = F.log_softmax(p_logits, dim=1)
+            p_loss = -torch.mean(torch.sum(pi_batch * log_p, dim=1))
+            loss = v_loss + p_loss
+            
+        scaler.scale(loss).backward()
+        
+        # Unscale for gradient clipping
+        scaler.unscale_(optimizer)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+        
+        scaler.step(optimizer)
+        scaler.update()
         
         if (step + 1) % 50 == 0:
-            print_flush(f"  [Step {step+1:03}] V_Loss: {v_loss.item():.4f} | P_Loss: {p_loss.item():.4f}")
+            print_flush(f"  [Step {step+1:04}/{num_steps}] V_Loss: {v_loss.item():.4f} | P_Loss: {p_loss.item():.4f}")
             if wandb and wandb.run:
                 wandb.log({
                     "train/step": step + 1,
@@ -318,8 +330,15 @@ def train_iteration(gen_id, gcs, num_steps=200):
                     "train/total_loss": loss.item(),
                     "train/learning_rate": optimizer.param_groups[0]['lr']
                 })
+        
+        # Periodic Checkpointing every 1000 steps
+        if (step + 1) % 1000 == 0:
+            periodic_ckpt = f"expert_eyes_gen_{gen_id}_step_{step+1}.pt"
+            torch.save(model.state_dict(), periodic_ckpt)
+            gcs.upload_file(periodic_ckpt, f"checkpoints/periodic/{periodic_ckpt}")
+            os.remove(periodic_ckpt)
 
-    # Save and upload
+    # Final Save and upload
     gen_ckpt = f"expert_eyes_gen_{gen_id}.pt"
     torch.save(model.state_dict(), gen_ckpt)
     gcs.upload_file(gen_ckpt, f"checkpoints/{gen_ckpt}")
@@ -330,17 +349,17 @@ def train_iteration(gen_id, gcs, num_steps=200):
     shutil.rmtree(tmp_dir)
     print_flush(f"Iteration {gen_id} complete.")
 
-def play_mode(gcs, num_games=10, max_sims=400):
+def play_mode(gcs, num_games=10, max_sims=400, job_id=None):
     print_flush(f"=== Starting Play Mode ({num_games} Games, {max_sims} Simulations) ===")
     game = pyspiel.load_game("backgammon(dmp_only=True)")
     
     # Scale: 20 blocks, 256 filters
-    model = ExpertEyesNet(num_res_blocks=20, num_filters=256)
+    model = ExpertEyesNet(num_res_blocks=20, num_filters=256).to(DEVICE)
     
     local_latest = "latest_worker.pt"
     if gcs.download_file("checkpoints/latest.pt", local_latest):
-        model.load_state_dict(torch.load(local_latest, weights_only=False))
-        print_flush("Loaded latest checkpoint from GCS.")
+        model.load_state_dict(torch.load(local_latest, map_location=DEVICE, weights_only=False))
+        print_flush(f"Loaded latest checkpoint from GCS onto {DEVICE}.")
     else:
         print_flush("ERROR: No latest.pt found on GCS! Run with --mode init_scratch first.")
         return
@@ -349,53 +368,78 @@ def play_mode(gcs, num_games=10, max_sims=400):
     evaluator = ExpertEyesEvaluator(model)
     
     # Resilience IDs: Use command line arg -> Environment variable -> Default
-    job_id = args.job_id or os.environ.get("CLOUD_ML_JOB_ID", str(int(time.time())))
-    worker_id = args.worker_id or os.environ.get("CLOUD_ML_TASK_ID", "0")
+    job_id = job_id or os.environ.get("CLOUD_ML_JOB_ID", str(int(time.time())))
+    worker_id = get_vertex_worker_id()
+    print_flush(f"Assigned Identity: Worker {worker_id} (Job: {job_id})")
     
-    for g in range(num_games):
-        # Pattern: game_{job_id}_w{worker_id}_{index}
-        xg_filename = f"game_{job_id}_w{worker_id}_{g+1}_xg.txt"
-        data_filename = f"game_{job_id}_w{worker_id}_{g+1}.pt_data"
-        
-        # Check if this specific game already exists in GCS
-        if gcs.exists(f"logs/{xg_filename}"):
-            print_flush(f"  Game {g+1}/{num_games} (Worker {worker_id}) already exists in GCS. Skipping.")
-            continue
+    for idx in range(1, num_games + 1):
+        try:
+            # Pattern: game_{job_id}_w{worker_id}_{index}
+            xg_filename = f"game_{job_id}_w{worker_id}_{idx}_xg.txt"
+            data_filename = f"game_{job_id}_w{worker_id}_{idx}.pt_data"
             
-        print_flush(f"  Playing Game {g+1}/{num_games} (Worker {worker_id})...")
-        game_data = play_training_game(game, model, evaluator, write_xg=True, xg_filename=xg_filename, max_sims=max_sims)
-        
-        # Save raw data for trainer
-        torch.save(game_data, data_filename)
-        
-        # Upload both to GCS
-        gcs.upload_file(xg_filename, f"logs/{xg_filename}")
-        gcs.upload_file(data_filename, f"logs/{data_filename}")
-        
-        # Local Cleanup
-        os.remove(xg_filename)
-        os.remove(data_filename)
-
-        if wandb and wandb.run:
-            # Game stats
-            returns = game_data[0][2] if game_data else 0 # z from first entry (terminal return)
-            wandb.log({
-                "play/game_length": len(game_data),
-                "play/game_result": returns, # +1 or -1
-                "play/generation": gcs.get_latest_checkpoint_info()
-            })
+            # Check if this specific game already exists in GCS
+            if gcs.exists(f"logs/{xg_filename}"):
+                print_flush(f"  Game {idx}/{num_games} (Worker {worker_id}) already exists in GCS. Skipping.")
+                continue
+                
+            print_flush(f"  [START] Playing Game {idx}/{num_games} (Worker {worker_id})...")
+            game_data = play_training_game(game, model, evaluator, write_xg=True, xg_filename=xg_filename, max_sims=max_sims)
+            
+            # Save raw data for trainer
+            torch.save(game_data, data_filename)
+            
+            # Upload both to GCS
+            gcs.upload_file(xg_filename, f"logs/{xg_filename}")
+            gcs.upload_file(data_filename, f"logs/{data_filename}")
+            
+            # Local Cleanup
+            os.remove(xg_filename)
+            os.remove(data_filename)
+            print_flush(f"  [COMPLETE] Game {idx}/{num_games} uploaded to GCS.")
+            
+            if wandb and wandb.run:
+                # Game stats
+                returns = game_data[0][2] if game_data else 0 # z from first entry (terminal return)
+                wandb.log({
+                    "play/game_length": len(game_data),
+                    "play/game_progress": idx / num_games,
+                    "play/game_result": returns, # +1 or -1
+                    "play/generation": gcs.get_latest_checkpoint_info()
+                })
+        except Exception as e:
+            print_flush(f"CRITICAL ERROR in Game {idx} (Worker {worker_id}): {str(e)}")
+            traceback.print_exc()
+            # We don't exit here; we try the next game
+            continue 
         
     print_flush("Play session complete.")
 
 def init_scratch(gcs):
     print_flush("=== Initializing Clean Slate Model (20 Blocks, 256 Filters) ===")
-    model = ExpertEyesNet(num_res_blocks=20, num_filters=256)
+    model = ExpertEyesNet(num_res_blocks=RES_BLOCKS, num_filters=FILTERS).to(DEVICE)
     ckpt_name = "expert_eyes_gen_0.pt"
     torch.save(model.state_dict(), ckpt_name)
     gcs.upload_file(ckpt_name, f"checkpoints/{ckpt_name}")
     gcs.upload_file(ckpt_name, "checkpoints/latest.pt")
     os.remove(ckpt_name)
     print_flush("Initialization complete. Model gs://{gcs.bucket.name}/checkpoints/latest.pt is ready.")
+
+def get_vertex_worker_id():
+    # Attempt to parse Vertex AI CLUSTER_SPEC (Standard for Multi-Worker Jobs)
+    cluster_spec_str = os.environ.get("CLUSTER_SPEC")
+    if cluster_spec_str:
+        try:
+            spec = json.loads(cluster_spec_str)
+            task = spec.get("task", {})
+            pool_name = task.get("type", "workerpool")
+            index = task.get("index", 0)
+            return f"{pool_name}_{index}"
+        except Exception:
+            pass
+    
+    # Fallback to standard ML environment variables or default
+    return os.environ.get("CLOUD_ML_TASK_ID", os.environ.get("AIP_TASK_INDEX", "0"))
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -404,6 +448,8 @@ if __name__ == "__main__":
     parser.add_argument("--num_games", type=int, default=10, help="Number of games to play in 'play' mode")
     parser.add_argument("--sims", type=int, default=400, help="MCTS simulations per move")
     parser.add_argument("--steps", type=int, default=200, help="Optimization steps in 'train' mode")
+    parser.add_argument("--lr", type=float, default=0.01, help="Learning rate for training")
+    parser.add_argument("--batch_size", type=int, default=128, help="Batch size for training")
     parser.add_argument("--wandb", action="store_true", help="Explicit toggle for W&B telemetry")
     parser.add_argument("--job_id", type=str, default=None, help="Explicit Job ID for resumption testing")
     parser.add_argument("--worker_id", type=str, default=None, help="Explicit Worker ID for resumption testing")
@@ -420,14 +466,14 @@ if __name__ == "__main__":
         run_name = f"gen_{current_gen}_{args.mode}_{int(time.time())}"
         
         # Auto-config architecture
-        temp_model = ExpertEyesNet(num_res_blocks=20, num_filters=256)
+        temp_model = ExpertEyesNet(num_res_blocks=RES_BLOCKS, num_filters=FILTERS).to(DEVICE)
         config = {
             "mode": args.mode,
-            "resnet_blocks": 20,
-            "filters": 256,
+            "resnet_blocks": RES_BLOCKS,
+            "filters": FILTERS,
             "mcts_sims": args.sims,
-            "learning_rate": 0.01,
-            "batch_size": 128,
+            "learning_rate": args.lr if args.mode == "train" else 0.01,
+            "batch_size": args.batch_size if args.mode == "train" else 128,
             "architecture": str(temp_model)
         }
         
@@ -447,7 +493,7 @@ if __name__ == "__main__":
     if args.mode == "init_scratch":
         init_scratch(gcs)
     elif args.mode == "play":
-        play_mode(gcs, num_games=args.num_games, max_sims=args.sims)
+        play_mode(gcs, num_games=args.num_games, max_sims=args.sims, job_id=args.job_id)
     elif args.mode == "train":
         latest_gen = gcs.get_latest_checkpoint_info()
-        train_iteration(latest_gen + 1, gcs, num_steps=args.steps)
+        train_iteration(latest_gen + 1, gcs, num_steps=args.steps, lr=args.lr, batch_size=args.batch_size)
