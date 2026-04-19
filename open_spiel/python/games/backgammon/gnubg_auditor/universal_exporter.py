@@ -18,7 +18,7 @@ class UniversalExporter:
         )
 
     @staticmethod
-    def format_game(move_records, player1="Player 1", player2="Player 2"):
+    def format_game(move_records, player1="Player 1", player2="Player 2", winner_id=0):
         """
         Formats a full game into the exact 'Good' Snowie Text string.
         """
@@ -44,15 +44,21 @@ class UniversalExporter:
                         p2_move = p2_move.replace(f"{move} {move} {move}", f"{move}(3)")
                         p2_move = p2_move.replace(f"{move} {move}", f"{move}(2)")
             
-            line = f"  {move_num:2}) {p1['dice']}: {p1_move:<28} {move_records[i+1]['dice'] if i+1 < len(move_records) else ''}: {p2_move}"
+            p1_dice = p1['dice']
+            p2_dice = move_records[i+1]['dice'] if i+1 < len(move_records) else ""
+            line = f"  {move_num:2}) {p1_dice}: {p1_move:<28} {p2_dice}: {p2_move}"
             output += line + "\n"
             
-        output += "  Wins 1 point\r\n"
+        if winner_id == 0:
+            output += "  Wins 1 point\r\n"
+        else:
+            # Pad with 37 spaces to align under the right column
+            output += "                                     Wins 1 point\r\n"
         return output
 
     @staticmethod
-    def write_to_file(filename, move_records, player1="Player 1", player2="Player 2"):
-        content = UniversalExporter.format_game(move_records, player1, player2)
+    def write_to_file(filename, move_records, player1="Player 1", player2="Player 2", winner_id=0):
+        content = UniversalExporter.format_game(move_records, player1, player2, winner_id)
         with open(filename, "w") as f:
             f.write(content)
         return filename
