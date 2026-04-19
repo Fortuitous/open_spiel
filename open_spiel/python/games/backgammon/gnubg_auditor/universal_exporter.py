@@ -32,15 +32,16 @@ class UniversalExporter:
         for rec in move_records:
             p = rec['player']
             if p == 0:
-                if current_turn["p0"] is not None:
-                    # Start new turn
+                # Player 0 move ALWAYS starts a new turn unless we have a completely empty current_turn
+                if current_turn["p0"] is not None or current_turn["p1"] is not None:
                     turns.append(current_turn)
                     current_turn = {"p0": rec, "p1": None}
                 else:
                     current_turn["p0"] = rec
-            else:
+            else: # p == 1
+                # Player 1 move ALWAYS completes a turn. 
+                # If they already moved (shouldn't happen in standard BG but for safety), start new.
                 if current_turn["p1"] is not None:
-                    # Start new turn
                     turns.append(current_turn)
                     current_turn = {"p0": None, "p1": rec}
                 else:
@@ -73,7 +74,11 @@ class UniversalExporter:
                     p1_moves = p1_moves.replace(f"{m} {m} {m}", f"{m}(3)")
                     p1_moves = p1_moves.replace(f"{m} {m}", f"{m}(2)")
             
-            line = f"  {move_num:2}) {p0_dice}: {p0_moves:<28} {p1_dice}: {p1_moves}"
+            # Conditionally format columns to avoid stray colons
+            p0_col = f"{p0_dice:2}: {p0_moves:<28}" if p0 else f"{' ':32}"
+            p1_col = f"{p1_dice:2}: {p1_moves}" if p1 else ""
+            
+            line = f"  {move_num:2}) {p0_col} {p1_col}".rstrip()
             output += line + "\n"
             
         # Winner alignment: Player 0 is Left, Player 1 is Right.
