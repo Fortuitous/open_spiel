@@ -96,8 +96,8 @@ def clean_dice_for_xg(dice_str):
     if "roll: " in dice_str:
         raw = dice_str.split("roll: ")[1].strip(")")
         sorted_dice = "".join(sorted(list(raw), reverse=True))
-        return sorted_dice + ":"
-    return dice_str + ":"
+        return sorted_dice
+    return dice_str
 
 def format_moves_for_xg(move_str):
     if " - " in move_str:
@@ -209,8 +209,11 @@ def play_training_game(game, model, evaluator, write_xg=False, xg_filename="smok
             game_history.append((player, obs_tensor, pi_sparse))
             
             children = root.children
-            sorted_children = sorted(children, key=lambda c: c.explore_count, reverse=True)
-            action = sorted_children[0].action
+            if children:
+                sorted_children = sorted(children, key=lambda c: c.explore_count, reverse=True)
+                action = sorted_children[0].action
+            else:
+                action = random.choice(state.legal_actions())
             
             if write_xg:
                 move_str = format_moves_for_xg(state.action_to_string(player, action))
@@ -235,6 +238,7 @@ def play_training_game(game, model, evaluator, write_xg=False, xg_filename="smok
         
     if write_xg:
         winner_id = 0 if returns[0] > 0 else 1
+        print_flush(f"DEBUG: Game Finished. Returns: {returns}, WinnerID: {winner_id}, File: {xg_filename}")
         UniversalExporter.write_to_file(xg_filename, move_records, winner_id=winner_id)
             
     return formatted_data

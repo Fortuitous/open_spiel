@@ -99,9 +99,12 @@ def run_sampled_audit(prefix="gen1.0", num_batches=10, games_per_batch=10):
     client = storage.Client()
     bucket = client.bucket("expert-eyes-training-742")
     
+    def natural_sort_key(s):
+        return [int(text) if text.isdigit() else text.lower() for text in re.split('([0-9]+)', s)]
+        
     blobs = list(client.list_blobs(bucket, prefix=f"logs/game_{prefix}_"))
     xg_blobs = [b for b in blobs if b.name.endswith("_xg.txt")]
-    xg_blobs.sort(key=lambda b: b.name)
+    xg_blobs.sort(key=lambda b: natural_sort_key(b.name))
     
     if not xg_blobs:
         print("No logs found.")
@@ -154,5 +157,8 @@ def run_sampled_audit(prefix="gen1.0", num_batches=10, games_per_batch=10):
         print(f"* **Median Snowie Error**: {median_snowie:.2f}")
 
 if __name__ == "__main__":
-    # Test on Game 5 specifically first to verify alignment
-    run_sampled_audit()
+    import sys
+    prefix = sys.argv[1] if len(sys.argv) > 1 else "gen1.0"
+    num_batches = int(sys.argv[2]) if len(sys.argv) > 2 else 10
+    games_per_batch = int(sys.argv[3]) if len(sys.argv) > 3 else 10
+    run_sampled_audit(prefix=prefix, num_batches=num_batches, games_per_batch=games_per_batch)

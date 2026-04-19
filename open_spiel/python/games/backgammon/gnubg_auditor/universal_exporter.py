@@ -20,40 +20,67 @@ class UniversalExporter:
     @staticmethod
     def format_game(move_records, player1="Player 1", player2="Player 2", winner_id=0):
         """
-        Formats a full game into the exact 'Good' Snowie Text string.
+        Formats the moves into a Snowie-compatible text format.
+        Ensures Player 0 is always in the Left column and Player 1 is always in the Right.
         """
         output = UniversalExporter.get_snowie_header(player1, player2)
         
-        for i in range(0, len(move_records), 2):
-            move_num = (i // 2) + 1
-            p1 = move_records[i]
-            p1_move = " ".join(p1['moves'])
-            if len(set(p1['dice'])) == 1: # It's a double
-                for move in set(p1['moves']):
-                    p1_move = p1_move.replace(f"{move} {move} {move} {move}", f"{move}(4)")
-                    p1_move = p1_move.replace(f"{move} {move} {move}", f"{move}(3)")
-                    p1_move = p1_move.replace(f"{move} {move}", f"{move}(2)")
+        # Group records by turn (a turn is a sequence of X move followed by O move)
+        turns = []
+        current_turn = {"p0": None, "p1": None}
+        
+        for rec in move_records:
+            p = rec['player']
+            if p == 0:
+                if current_turn["p0"] is not None:
+                    # Start new turn
+                    turns.append(current_turn)
+                    current_turn = {"p0": rec, "p1": None}
+                else:
+                    current_turn["p0"] = rec
+            else:
+                if current_turn["p1"] is not None:
+                    # Start new turn
+                    turns.append(current_turn)
+                    current_turn = {"p0": None, "p1": rec}
+                else:
+                    current_turn["p1"] = rec
+        
+        if current_turn["p0"] or current_turn["p1"]:
+            turns.append(current_turn)
+
+        for i, turn in enumerate(turns):
+            move_num = i + 1
+            p0 = turn["p0"]
+            p1 = turn["p1"]
             
-            p2_move = ""
-            if i + 1 < len(move_records):
-                p2 = move_records[i+1]
-                p2_move = " ".join(p2['moves'])
-                if len(set(p2['dice'])) == 1: # It's a double
-                    for move in set(p2['moves']):
-                        p2_move = p2_move.replace(f"{move} {move} {move} {move}", f"{move}(4)")
-                        p2_move = p2_move.replace(f"{move} {move} {move}", f"{move}(3)")
-                        p2_move = p2_move.replace(f"{move} {move}", f"{move}(2)")
+            p0_dice = p0['dice'] if p0 else ""
+            p0_moves = " ".join(p0['moves']) if p0 else ""
             
-            p1_dice = p1['dice']
-            p2_dice = move_records[i+1]['dice'] if i+1 < len(move_records) else ""
-            line = f"  {move_num:2}) {p1_dice}: {p1_move:<28} {p2_dice}: {p2_move}"
+            p1_dice = p1['dice'] if p1 else ""
+            p1_moves = " ".join(p1['moves']) if p1 else ""
+            
+            # Format doubles
+            if p0 and len(set(p0['dice'])) == 1:
+                for m in set(p0['moves']):
+                    p0_moves = p0_moves.replace(f"{m} {m} {m} {m}", f"{m}(4)")
+                    p0_moves = p0_moves.replace(f"{m} {m} {m}", f"{m}(3)")
+                    p0_moves = p0_moves.replace(f"{m} {m}", f"{m}(2)")
+            
+            if p1 and len(set(p1['dice'])) == 1:
+                for m in set(p1['moves']):
+                    p1_moves = p1_moves.replace(f"{m} {m} {m} {m}", f"{m}(4)")
+                    p1_moves = p1_moves.replace(f"{m} {m} {m}", f"{m}(3)")
+                    p1_moves = p1_moves.replace(f"{m} {m}", f"{m}(2)")
+            
+            line = f"  {move_num:2}) {p0_dice}: {p0_moves:<28} {p1_dice}: {p1_moves}"
             output += line + "\n"
             
+        # Winner alignment: Player 0 is Left, Player 1 is Right.
         if winner_id == 0:
             output += "  Wins 1 point\r\n"
         else:
-            # Pad with 37 spaces to align under the right column
-            output += "                                     Wins 1 point\r\n"
+            output += f"{' ':>40}Wins 1 point\r\n"
         return output
 
     @staticmethod
