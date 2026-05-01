@@ -1,0 +1,14 @@
+workerPoolSpecs:
+  - machineSpec:
+      machineType: n1-highmem-8
+      acceleratorType: NVIDIA_TESLA_T4
+      acceleratorCount: 1
+    replicaCount: 1
+    containerSpec:
+      imageUri: us-central1-docker.pkg.dev/expert-eyes-training-742/expert-eyes-repo/trainer:v19
+      args:
+        - "--mode=play"
+        - "--num_games=10"
+        - "--sims=1"
+        - "--bucket_name=expert-eyes-training-742"
+        - "--job_id=diag_gen1.2_no_mcts"
