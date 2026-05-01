@@ -33,6 +33,7 @@ Used for spatial sanity-checking and local debugging.
 - `/checkpoints`: Contains `latest.pt` and `expert_eyes_gen_[X].pt`.
 - `/logs`: Contains self-play `.pt_data` and `_xg.txt` trajectory logs.
 - `/summaries`: Contains `master_audit_summary.txt` and `audit_run_[X].txt` files.
+- `current_gen.json`: A persistent state file you must maintain to track the current loop generation (e.g., `{"current_gen": 2.1}`) so the loop survives orchestrator restarts.
 - `/gold_standard_audits`: Protected benchmark directory. **Do not overwrite or mutate files in this directory during training loops.**
 
 ## 3. Operational 'Tribal Knowledge'
@@ -49,7 +50,7 @@ To ensure a perfectly clean baseline, JulesWeb must execute this in two phases:
 1. **Initialize Weights:** Run `trainer_v1.py` with `--mode init_scratch` (or similar) to generate and upload the random 1220-schema `latest.pt`.
 2. **Eval Collect:** Trigger `diag_no_mcts.yaml` and `diag_mcts_400.yaml`. Ensure these output to GCS with the prefix `logs/diag_gen2.0_`.
 3. **Audit:** Run `python3 gnubg_auditor/generational_auditor.py 2.0` to generate the absolute baseline summary logs.
-4. **Publish:** Read `master_audit_summary.txt` from GCS and update the external Google Doc.
+4. **Publish:** Read `audit_run_2.0.txt` and `master_audit_summary.txt` from GCS. Initialize the Google Sheet, add a tab named "2.0 Audit" for the run data, and a "Master" tab for the summary data.
 
 ### Phase 2: The Infinite 2.x Training Loop
 *(Start tracking at `GEN_NAME = 2.1` and loop infinitely)*
@@ -57,7 +58,7 @@ To ensure a perfectly clean baseline, JulesWeb must execute this in two phases:
 2. **Train:** Trigger `mass_collection_gen2_train.yaml` to update weights based on those 1000 games.
 3. **Eval Collect:** Trigger `diag_no_mcts.yaml` and `diag_mcts_400.yaml`. Ensure these output to GCS with the prefix `logs/diag_gen[GEN_NAME]_`.
 4. **Audit:** Run `python3 gnubg_auditor/generational_auditor.py [GEN_NAME]` to append to the master summary.
-5. **Publish & Repeat:** Read the updated `master_audit_summary.txt` from GCS, update the external Google Doc, increment the `GEN_NAME` tracker (e.g., to 2.2), and restart from Step 1.
+5. **Publish & State Save:** Read `audit_run_[GEN_NAME].txt` and `master_audit_summary.txt` from GCS. Create a new tab in the Google Sheet (e.g., "2.1 Audit") for the run data, and update the "Master" tab. Increment the `GEN_NAME` tracker (e.g., to 2.2), save this state to `current_gen.json` in the GCS bucket to survive VM restarts, and restart from Step 1.
 
 ## 5. Annotated Directory
 
