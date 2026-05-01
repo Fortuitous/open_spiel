@@ -43,6 +43,23 @@ constexpr int kNumBarPosHumanReadable = 25;
 constexpr int kNumOffPosHumanReadable = -2;
 constexpr int kNumNonDoubleOutcomes = 30;  // 5*6
 
+// 45 planes (v12.2):
+// 0-4: my num checkers (1, 2, 3, 4, 5+)
+// 5-9: opp num checkers (1, 2, 3, 4, 5+)
+// 10: my bar, 11: opp bar
+// 12: my score, 13: opp score
+// 14: my pips, 15: opp pips
+// 16: pips diff
+// 17-18: cur player, 19: moves remaining
+// 20: my home board points made, 21: opp home board points made
+// 22-25: my deep/adv anchors, 26-29: opp deep/adv anchors
+// 30-36: match info / doubling (not used in dmp)
+// 37-40: my bar status (1, 2, 3, 4+)
+// 41-44: opp bar status (1, 2, 3, 4+)
+// 45-46: home board strength broadcast (my/opp)
+// Indices 1128-1145: Global scalars (18)
+const int kNumPlanes = 47;
+
 const std::vector<std::vector<int>> kChanceOutcomeValues = {
     {1, 2}, {2, 1}, {1, 3}, {3, 1}, {1, 4}, {4, 1},
     {1, 5}, {5, 1}, {1, 6}, {6, 1}, {2, 3}, {3, 2},
@@ -253,12 +270,17 @@ void BackgammonState::ObservationTensor(Player player,
   SPIEL_CHECK_EQ(values.size(), kStateEncodingSize);
 
   std::fill(values.begin(), values.end(), 0.0f);
-  open_spiel::TensorView<3> tensor(absl::MakeSpan(values).subspan(0, 888), {37, 1, 24}, true);
+  
+  // v12.2: 50 planes * 24 points = 1200 spatial elements
+  const int kNumPlanes = 50;
+  open_spiel::TensorView<3> tensor(absl::MakeSpan(values).subspan(0, 24 * kNumPlanes), {kNumPlanes, 1, 24}, true);
 
-  bool contact = HasContact();
   int my_pips = PipCount(player);
   int opp_pips = PipCount(Opponent(player));
   int moves_left = dice_.size(); 
+  int my_home_points = HomePointsMade(player);
+  int opp_home_points = HomePointsMade(Opponent(player));
+  bool contact = HasContact();
 
   auto norm_pip = [](int p) { return static_cast<float>(p) / 375.0f; };
   auto norm_checkers = [](int c) { return static_cast<float>(c) / 15.0f; };
@@ -273,10 +295,12 @@ void BackgammonState::ObservationTensor(Player player,
     bool is_opp = opp_count > 0;
     int count = is_mine ? my_count : opp_count;
 
-    // --- PERSISTENT PLANES (1-21) ---
+    // --- SPATIAL PLANES (0-49) ---
+    // 0-1: Checker presence
     if (is_mine) tensor[{0, 0, i}] = norm_checkers(count);
     if (is_opp)  tensor[{1, 0, i}] = norm_checkers(count);
 
+    // 2-13: Checker counts (1, 2, 3, 4, 5, 6)
     if (is_mine) {
         int idx = std::min(count, 6);
         tensor[{idx + 1, 0, i}] = 1.0f; 
@@ -285,60 +309,80 @@ void BackgammonState::ObservationTensor(Player player,
         tensor[{idx + 7, 0, i}] = 1.0f;
     }
 
-    tensor[{14, 0, i}] = norm_pip(my_pips);
-    tensor[{15, 0, i}] = norm_pip(opp_pips);
-    tensor[{16, 0, i}] = norm_pip(std::abs(my_pips - opp_pips));
-    tensor[{17, 0, i}] = norm_checkers(scores_[player]);
-    tensor[{18, 0, i}] = norm_checkers(scores_[Opponent(player)]);
-    tensor[{19, 0, i}] = static_cast<float>(moves_left) / 4.0f;
-    tensor[{20, 0, i}] = contact ? 1.0f : 0.0f;
+    // 14-21: Board Scalars (Broadcasted)
+    tensor[{14, 0, i}] = norm_checkers(scores_[player]);
+    tensor[{15, 0, i}] = norm_checkers(scores_[Opponent(player)]);
+    tensor[{16, 0, i}] = static_cast<float>(moves_left) / 4.0f;
+    tensor[{17, 0, i}] = 0.0f; // Opp moves left
+    tensor[{18, 0, i}] = norm_pip(my_pips);
+    tensor[{19, 0, i}] = norm_pip(opp_pips);
+    tensor[{20, 0, i}] = norm_pip(opp_pips - my_pips);
+    tensor[{21, 0, i}] = contact ? 1.0f : 0.0f;
 
-    // --- GATED TACTICAL PLANES (22-41) ---
+    // --- TACTICAL FEATURES (GATED BY CONTACT) ---
     if (contact) {
-      if (is_mine && i >= 21) tensor[{21, 0, i}] = 1.0f; // My Deep
-      if (is_opp  && i <= 2)  tensor[{22, 0, i}] = 1.0f; // Opp Deep
-      if (is_mine && i >= 17 && i <= 20) tensor[{23, 0, i}] = 1.0f; // My Adv
-      if (is_opp  && i >= 3 && i <= 6)   tensor[{24, 0, i}] = 1.0f; // Opp Adv
+      // My Tactical Features (22-34)
+      if (my_count >= 2 && i >= 21) tensor[{22, 0, i}] = 1.0f; // My Deep Anchor
+      if (my_count >= 2 && i >= 17 && i <= 20) tensor[{23, 0, i}] = 1.0f; // My Adv Anchor
 
-      int s_len = GetPrimeLength(player, b);
-      if (s_len >= 2) {
-          for (int p = 0; p < std::min(s_len - 1, 5); ++p) 
-              tensor[{25 + p, 0, i}] = 1.0f;
-      }
-      
-      int o_len = GetPrimeLength(Opponent(player), b);
-      if (o_len >= 2) {
-          for (int p = 0; p < std::min(o_len - 1, 5); ++p) 
-              tensor[{30 + p, 0, i}] = 1.0f;
+      int my_prime_len = GetPrimeLength(player, b);
+      if (my_prime_len >= 2) {
+          for (int p = 0; p < std::min(my_prime_len - 1, 5); ++p) 
+              tensor[{24 + p, 0, i}] = 1.0f; // My Primes (24-28)
       }
 
-      tensor[{35, 0, i}] = GetBlockadeDensity(player, player, i, 1);
-      tensor[{36, 0, i}] = GetBlockadeDensity(player, Opponent(player), i, -1);
+      tensor[{29, 0, i}] = GetBlockadeDensity(player, player, i, 1); // My Blockade
+
+      tensor[{30, 0, i}] = static_cast<float>(my_home_points) / 6.0f; // My Home Strength
+
+      for (int j = 0; j < 4; ++j) {
+        if (bar_[player] == j + 1 || (j == 3 && bar_[player] >= 4)) {
+          tensor[{31 + j, 0, i}] = 1.0f; // My Bar (31-34)
+        }
+      }
+
+      // Opp Tactical Features (35-47)
+      if (opp_count >= 2 && i <= 2)  tensor[{35, 0, i}] = 1.0f; // Opp Deep Anchor
+      if (opp_count >= 2 && i >= 3 && i <= 6)   tensor[{36, 0, i}] = 1.0f; // Opp Adv Anchor
+
+      int opp_prime_len = GetPrimeLength(Opponent(player), b);
+      if (opp_prime_len >= 2) {
+          for (int p = 0; p < std::min(opp_prime_len - 1, 5); ++p) 
+              tensor[{37 + p, 0, i}] = 1.0f; // Opp Primes (37-41)
+      }
+
+      tensor[{42, 0, i}] = GetBlockadeDensity(player, Opponent(player), i, -1); // Opp Blockade
+
+      tensor[{43, 0, i}] = static_cast<float>(opp_home_points) / 6.0f; // Opp Home Strength
+
+      for (int j = 0; j < 4; ++j) {
+        if (bar_[Opponent(player)] == j + 1 || (j == 3 && bar_[Opponent(player)] >= 4)) {
+          tensor[{44 + j, 0, i}] = 1.0f; // Opp Bar (44-47)
+        }
+      }
     }
   }
 
-  // --- APPEND 18 GLOBAL SCALARS ---
-  values[888] = norm_pip(my_pips);
-  values[889] = norm_pip(opp_pips);
-  values[890] = norm_pip(std::abs(my_pips - opp_pips));
-  values[891] = norm_checkers(scores_[player]);
-  values[892] = norm_checkers(scores_[Opponent(player)]);
-  values[893] = static_cast<float>(moves_left) / 4.0f;
-  
-  values[894] = static_cast<float>(HomePointsMade(player)) / 6.0f;
-  values[895] = static_cast<float>(HomePointsMade(Opponent(player))) / 6.0f;
-  values[896] = norm_checkers(bar_[player]);
-  values[897] = norm_checkers(bar_[Opponent(player)]);
-
-  values[898] = (bar_[player] == 1) ? 1.0f : 0.0f;
-  values[899] = (bar_[player] == 2) ? 1.0f : 0.0f;
-  values[900] = (bar_[player] == 3) ? 1.0f : 0.0f;
-  values[901] = (bar_[player] >= 4) ? 1.0f : 0.0f;
-
-  values[902] = (bar_[Opponent(player)] == 1) ? 1.0f : 0.0f;
-  values[903] = (bar_[Opponent(player)] == 2) ? 1.0f : 0.0f;
-  values[904] = (bar_[Opponent(player)] == 3) ? 1.0f : 0.0f;
-  values[905] = (bar_[Opponent(player)] >= 4) ? 1.0f : 0.0f;
+  // --- APPEND 20 GLOBAL SCALARS (Starting at Index 1200) ---
+  float* g_values = values.data() + 1200;
+  g_values[0] = norm_checkers(scores_[player]);
+  g_values[1] = norm_checkers(scores_[Opponent(player)]);
+  g_values[2] = static_cast<float>(moves_left) / 4.0f;
+  g_values[3] = 0.0f; // Opp moves left
+  g_values[4] = norm_pip(my_pips);
+  g_values[5] = norm_pip(opp_pips);
+  g_values[6] = norm_pip(opp_pips - my_pips);
+  g_values[7] = contact ? 1.0f : 0.0f;
+  g_values[8] = static_cast<float>(my_home_points) / 6.0f;
+  g_values[9] = norm_checkers(bar_[player]);
+  for (int j = 0; j < 4; ++j) {
+    g_values[10 + j] = (bar_[player] == j + 1 || (j == 3 && bar_[player] >= 4)) ? 1.0f : 0.0f;
+  }
+  g_values[14] = static_cast<float>(opp_home_points) / 6.0f;
+  g_values[15] = norm_checkers(bar_[Opponent(player)]);
+  for (int j = 0; j < 4; ++j) {
+    g_values[16 + j] = (bar_[Opponent(player)] == j + 1 || (j == 3 && bar_[Opponent(player)] >= 4)) ? 1.0f : 0.0f;
+  }
 }
 
 int BackgammonState::GetPrimeLength(Player p_check, int b) const {
@@ -476,18 +520,25 @@ Player BackgammonState::CurrentPlayer() const {
 int BackgammonState::Opponent(int player) const { return 1 - player; }
 
 void BackgammonState::RollDice(int outcome) {
-  SPIEL_CHECK_TRUE(dice_.empty());
-  SetDice(kChanceOutcomeValues[outcome]);
+  SPIEL_CHECK_GE(outcome, 0);
+  SPIEL_CHECK_LT(outcome, kNumChanceOutcomes);
+
+  std::vector<int> dice = {outcome / 6 + 1, outcome % 6 + 1};
+  if (dice[0] == dice[1]) {
+    // For doublets, we actually have 4 dice to use!
+    dice.push_back(dice[0]);
+    dice.push_back(dice[0]);
+  }
+  SetDice(dice);
 }
 
 void BackgammonState::SetDice(const std::vector<int>& dice) {
   dice_ = dice;
-  if (dice_.size() == 2 && dice_[0] == dice_[1]) {
-    // For doublets, we actually have 4 dice to use!
-    dice_.push_back(dice_[0]);
-    dice_.push_back(dice_[0]);
-  } else if (dice_.size() > 1 && dice_[0] >= dice_[1]) {
-    std::swap(dice_[0], dice_[1]);
+  // Sort non-doublets for consistency
+  if (dice_.size() == 2 && dice_[0] != dice_[1]) {
+    if (dice_[0] >= dice_[1]) {
+      std::swap(dice_[0], dice_[1]);
+    }
   }
 }
 
@@ -1326,6 +1377,7 @@ std::vector<double> BackgammonState::Returns() const {
   int winner = -1;
   int loser = -1;
   int num_checkers = NumCheckersPerPlayer(game_.get());
+
   if (scores_[kXPlayerId] == num_checkers) {
     winner = kXPlayerId;
     loser = kOPlayerId;
