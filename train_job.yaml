@@ -5,21 +5,21 @@ workerPoolSpecs:
       acceleratorCount: 1
     replicaCount: 1
     containerSpec:
-      imageUri: us-central1-docker.pkg.dev/expert-eyes-training-742/expert-eyes-repo/trainer:v2
+      imageUri: us-central1-docker.pkg.dev/expert-eyes-training-742/expert-eyes-repo/trainer:v19
       args:
         - "--mode"
         - "train"
         - "--steps"
-        - "500"
+        - "1000"
         - "--bucket_name"
         - "expert-eyes-training-742"
         - "--wandb"
       env:
         - name: WANDB_RUN_GROUP
-          value: "v2-train-gen-1"
+          value: "1.2-training"
         - name: WANDB_API_KEY
           value: "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"
 scheduling:
-  timeout: 3600s
+  timeout: 14400s
   restartJobOnWorkerRestart: true
   strategy: SPOT

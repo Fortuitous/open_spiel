@@ -5,7 +5,7 @@ workerPoolSpecs:
       acceleratorCount: 1
     replicaCount: 1
     containerSpec:
-      imageUri: us-central1-docker.pkg.dev/expert-eyes-training-742/expert-eyes-repo/trainer:v7
+      imageUri: us-central1-docker.pkg.dev/expert-eyes-training-742/expert-eyes-repo/trainer:v19
       args:
         - "--mode"
         - "train"
@@ -17,6 +17,8 @@ workerPoolSpecs:
         - "5000"
         - "--bucket_name"
         - "expert-eyes-training-742"
+        - "--log_prefix"
+        - "logs/game_gen2_mass_collection_target"
         - "--wandb"
       env:
         - name: WANDB_RUN_GROUP

@@ -64,6 +64,11 @@ class GCSHelper:
         blobs.sort(key=lambda x: x.updated, reverse=True)
         return blobs[:limit]
 
+    def count_logs(self, prefix="logs/"):
+        blobs = list(self.client.list_blobs(self.bucket, prefix=prefix))
+        # Only count .pt_data files
+        return len([b for b in blobs if b.name.endswith(".pt_data")])
+
     def cleanup_old_logs(self, prefix="logs/", keep=5000):
         blobs = list(self.client.list_blobs(self.bucket, prefix=prefix))
         if len(blobs) <= keep:
@@ -249,7 +254,7 @@ def signal_handler(sig, frame):
 signal.signal(signal.SIGTERM, signal_handler)
 signal.signal(signal.SIGINT, signal_handler)
 
-def train_iteration(gen_id, gcs, num_steps=200, lr=0.01, batch_size=128):
+def train_iteration(gen_id, gcs, num_steps=200, lr=0.01, batch_size=128, log_prefix="logs/"):
     print_flush(f"=== Starting Training Iteration (Iteration: {gen_id}) ===")
     print_flush(f"Using Hyperparams: LR={lr}, Batch={batch_size}, Steps={num_steps}")
     print_flush(f"Model Architecture: {RES_BLOCKS} Blocks, {FILTERS} Filters (Big Brain)")
@@ -266,9 +271,9 @@ def train_iteration(gen_id, gcs, num_steps=200, lr=0.01, batch_size=128):
         print_flush("No latest checkpoint found. Starting from SCRATCH.")
 
     # Streaming Ingestion
-    print_flush("Streaming 1000 logs from GCS (logs/)...")
-    blobs = gcs.list_recent_logs(prefix="logs/", limit=1000)
-    print_flush(f"Found {len(blobs)} games in GCS (logs/)")
+    print_flush(f"Streaming 1000 logs from GCS ({log_prefix})...")
+    blobs = gcs.list_recent_logs(prefix=log_prefix, limit=1000)
+    print_flush(f"Found {len(blobs)} games in GCS ({log_prefix})")
     buffer = ReplayBuffer(capacity=100000)
     
     for i, blob in enumerate(blobs):
@@ -359,47 +364,65 @@ def train_iteration(gen_id, gcs, num_steps=200, lr=0.01, batch_size=128):
     gcs.upload_file(gen_ckpt, f"checkpoints/{gen_ckpt}")
     gcs.upload_file(gen_ckpt, "checkpoints/latest.pt")
     print_flush(f"Iteration {gen_id} complete.")
-
-def play_mode(gcs, num_games=10, max_sims=400, job_id=None):
-    print_flush(f"=== Starting Play Mode ({num_games} Games, {max_sims} Simulations) ===")
-    game = pyspiel.load_game("backgammon(dmp_only=True)")
-    model = ExpertEyesNet(num_res_blocks=20, num_filters=256).to(DEVICE)
+def play_mode(gcs, num_games=10, max_sims=400, job_id=None, global_target=None):
+    print_flush(f"=== Starting Play Mode (Target: {num_games if not global_target else f'Global {global_target}'}) ===")
     
-    local_latest = "latest_worker.pt"
-    if gcs.download_file("checkpoints/latest.pt", local_latest):
-        model.load_state_dict(torch.load(local_latest, map_location=DEVICE, weights_only=False))
-        print_flush(f"Loaded latest checkpoint from GCS onto {DEVICE}.")
-    else:
-        print_flush("ERROR: No latest.pt found on GCS!")
-        return
-
+    # Load model once
+    model = ExpertEyesNet(num_res_blocks=RES_BLOCKS, num_filters=FILTERS).to(DEVICE)
     model.eval()
+    
+    latest_path = "checkpoints/latest.pt"
+    local_latest = "latest_play.pt"
+    if gcs.download_file(latest_path, local_latest):
+        model.load_state_dict(torch.load(local_latest, map_location=DEVICE, weights_only=False))
+        print_flush(f"Loaded weights from gs://{gcs.bucket.name}/{latest_path}")
+    else:
+        print_flush("WARNING: No latest.pt found. Playing with RANDOM weights.")
+
+    game = pyspiel.load_game("backgammon(dmp_only=True)")
     evaluator = ExpertEyesEvaluator(model)
     
-    job_id = job_id or os.environ.get("CLOUD_ML_JOB_ID", str(int(time.time())))
     worker_id = get_vertex_worker_id()
-    print_flush(f"Assigned Identity: Worker {worker_id} (Job: {job_id})")
+    job_id = job_id or "default"
     
-    for idx in range(1, num_games + 1):
+    games_completed = 0
+    while True:
+        # Check termination condition
+        current_total = 0
+        if global_target:
+            current_total = gcs.count_logs(prefix=f"logs/game_{job_id}")
+            if current_total >= global_target:
+                print_flush(f"Global target of {global_target} reached (Current: {current_total}). Worker {worker_id} terminating.")
+                break
+        elif games_completed >= num_games:
+            print_flush(f"Local target of {num_games} reached. Worker {worker_id} terminating.")
+            break
+
+        idx = games_completed + 1
+        print_flush(f"--- Starting Game {idx} (Worker: {worker_id}, Global Total: {current_total if global_target else 'N/A'}) ---")
+        
         try:
-            xg_filename = f"game_{job_id}_w{worker_id}_{idx}_xg.txt"
-            data_filename = f"game_{job_id}_w{worker_id}_{idx}.pt_data"
+            timestamp = int(time.time())
+            xg_filename = f"game_{job_id}_{worker_id}_{timestamp}_{idx}_xg.txt"
+            data_filename = f"game_{job_id}_{worker_id}_{timestamp}_{idx}.pt_data"
             
-            if gcs.exists(f"logs/{xg_filename}"):
-                print_flush(f"  Game {idx}/{num_games} already exists. Skipping.")
-                continue
-                
-            print_flush(f"  [START] Playing Game {idx}/{num_games}...")
             game_data = play_training_game(game, model, evaluator, write_xg=True, xg_filename=xg_filename, max_sims=max_sims)
             torch.save(game_data, data_filename)
-            gcs.upload_file(xg_filename, f"logs/{xg_filename}")
+            
+            # Upload to GCS
             gcs.upload_file(data_filename, f"logs/{data_filename}")
-            os.remove(xg_filename)
+            gcs.upload_file(xg_filename, f"logs/{xg_filename}")
+            
+            # Cleanup local
             os.remove(data_filename)
-            print_flush(f"  [COMPLETE] Game {idx}/{num_games} uploaded.")
+            os.remove(xg_filename)
+            
+            games_completed += 1
+            
         except Exception as e:
             print_flush(f"CRITICAL ERROR in Game {idx}: {str(e)}")
             traceback.print_exc()
+            time.sleep(5) # Cooldown
             continue 
         
     print_flush("Play session complete.")
@@ -438,6 +461,8 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=128)
     parser.add_argument("--wandb", action="store_true")
     parser.add_argument("--job_id", type=str, default=None)
+    parser.add_argument("--log_prefix", type=str, default="logs/")
+    parser.add_argument("--global_target", type=int, default=None)
     args = parser.parse_args()
     
     if args.wandb and wandb and os.environ.get("WANDB_API_KEY"):
@@ -452,7 +477,7 @@ if __name__ == "__main__":
     if args.mode == "init_scratch":
         init_scratch(gcs)
     elif args.mode == "play":
-        play_mode(gcs, num_games=args.num_games, max_sims=args.sims, job_id=args.job_id)
+        play_mode(gcs, num_games=args.num_games, max_sims=args.sims, job_id=args.job_id, global_target=args.global_target)
     elif args.mode == "train":
         latest_gen = gcs.get_latest_checkpoint_info()
-        train_iteration(latest_gen + 1, gcs, num_steps=args.steps, lr=args.lr, batch_size=args.batch_size)
+        train_iteration(latest_gen + 1, gcs, num_steps=args.steps, lr=args.lr, batch_size=args.batch_size, log_prefix=args.log_prefix)
