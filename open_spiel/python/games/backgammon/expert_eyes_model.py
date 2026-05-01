@@ -1,6 +1,6 @@
 """
-v12.1 Residual Tower Architecture for DMP-only Backgammon.
-Inputs: 906-float tensor (37 spatial planes + 18 global scalars).
+v12.3 Residual Tower Architecture for DMP-only Backgammon.
+Inputs: 1220-float tensor (50 spatial planes + 20 global scalars).
 """
 import torch
 import torch.nn as nn
@@ -25,8 +25,8 @@ class ExpertEyesNet(nn.Module):
     def __init__(self, num_res_blocks=12, num_filters=256):
         super(ExpertEyesNet, self).__init__()
         
-        # Initial Convolution: 37 planes -> Feature Space
-        self.conv_in = nn.Conv2d(37, num_filters, kernel_size=(1, 3), padding=(0, 1), bias=False)
+        # Initial Convolution: 50 planes -> Feature Space
+        self.conv_in = nn.Conv2d(50, num_filters, kernel_size=(1, 3), padding=(0, 1), bias=False)
         self.bn_in = nn.BatchNorm2d(num_filters)
         
         # The Tower: 12 Residual Blocks
@@ -35,19 +35,19 @@ class ExpertEyesNet(nn.Module):
         # Value Head (Win Probability)
         self.value_conv = nn.Conv2d(num_filters, 1, kernel_size=1, bias=False)
         self.value_bn = nn.BatchNorm2d(1)
-        self.value_fc1 = nn.Linear(24 + 18, 128)
+        self.value_fc1 = nn.Linear(24 + 20, 128)
         self.value_fc2 = nn.Linear(128, 1)
         
         # Policy Head (Move Selection)
         self.policy_conv = nn.Conv2d(num_filters, 2, kernel_size=1, bias=False)
         self.policy_bn = nn.BatchNorm2d(2)
         # OpenSpiel's game.num_distinct_actions() = 913952
-        self.policy_fc = nn.Linear(2 * 24 + 18, 913952) 
+        self.policy_fc = nn.Linear(2 * 24 + 20, 913952)
 
     def forward(self, x_flat):
-        # x_flat is [Batch, 906]
-        x_spatial = x_flat[:, :888].view(-1, 37, 1, 24)
-        x_scalar = x_flat[:, 888:]
+        # x_flat is [Batch, 1220]
+        x_spatial = x_flat[:, :1200].view(-1, 50, 1, 24)
+        x_scalar = x_flat[:, 1200:]
         
         # Spatial Processing
         x = F.relu(self.bn_in(self.conv_in(x_spatial)))
