@@ -523,7 +523,7 @@ void BackgammonState::RollDice(int outcome) {
   SPIEL_CHECK_GE(outcome, 0);
   SPIEL_CHECK_LT(outcome, kNumChanceOutcomes);
 
-  std::vector<int> dice = {outcome / 6 + 1, outcome % 6 + 1};
+  std::vector<int> dice = {kChanceOutcomeValues[outcome][0], kChanceOutcomeValues[outcome][1]};
   if (dice[0] == dice[1]) {
     // For doublets, we actually have 4 dice to use!
     dice.push_back(dice[0]);

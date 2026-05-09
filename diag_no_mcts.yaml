@@ -5,7 +5,7 @@ workerPoolSpecs:
       acceleratorCount: 1
     replicaCount: 1
     containerSpec:
-      imageUri: us-central1-docker.pkg.dev/expert-eyes-training-742/expert-eyes-repo/trainer:v20
+      imageUri: us-central1-docker.pkg.dev/expert-eyes-training-742/expert-eyes-repo/trainer:v21
       args:
         - "--mode=play"
         - "--num_games=10"
