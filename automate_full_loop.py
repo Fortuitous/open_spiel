@@ -64,36 +64,47 @@ def wait_for_job(job_name, poll_interval=3600):
 
         time.sleep(poll_interval)
 
-def execute_pipeline(gen_name):
-    print(f"\n--- Executing Pipeline for Gen {gen_name} ---", flush=True)
+def execute_phase2():
+    print("\n--- Executing Phase 2: Cycle 2.2 ---", flush=True)
 
-    # We are resuming from Step 3: Eval Collect for Gen 2.1 (which outputs Model 2.2 logs)
-    greedy_job = "projects/947210424180/locations/us-central1/customJobs/332487076379361280"
-    mcts_job = "projects/947210424180/locations/us-central1/customJobs/862785932502237184"
+    # 1. Collection 2.2
+    collection_job = submit_job("phase-2-gen2.2-mass-collection", "mass_collection_gen2.yaml")
+    if not collection_job: return
+    success = wait_for_job(collection_job, poll_interval=3600)
+    if not success: return
 
-    # Ensure they are done
-    wait_for_job(greedy_job, poll_interval=600)
-    wait_for_job(mcts_job, poll_interval=600)
+    # 2. Training 2.2
+    train_job = submit_job("phase-2-gen2.2-training", "mass_collection_gen2_train.yaml")
+    if not train_job: return
+    success = wait_for_job(train_job, poll_interval=1800)
+    if not success: return
 
-    # 4. Audit & Publish (This evaluates Gen 2.2 model produced from Gen 2.1 training)
-    print(f"Running audit script for gen 2.2...", flush=True)
-    run_cmd(["python3", "open_spiel/python/games/backgammon/gnubg_auditor/generational_auditor.py", "2.2"])
+    # 3. Eval Collect 2.3 - Greedy & MCTS
+    greedy_job_2 = submit_job("diag-gen2.3-no-mcts", "diag_no_mcts.yaml")
+    mcts_job_2 = submit_job("diag-gen2.3-mcts", "diag_mcts_400.yaml")
 
-    # 5. Archive Collection Data
-    print("Archiving Gen 2.1 collection games...")
-    archive_cmd = [
+    if greedy_job_2: wait_for_job(greedy_job_2, poll_interval=600)
+    if mcts_job_2: wait_for_job(mcts_job_2, poll_interval=600)
+
+    # 4. Audit & Publish 2.3
+    print(f"Running audit script for gen 2.3...", flush=True)
+    run_cmd(["rm", "-rf", "open_spiel/python/games/backgammon/audit_temp/"])
+    run_cmd(["python3", "open_spiel/python/games/backgammon/gnubg_auditor/generational_auditor.py", "2.3"])
+
+    # Archive Gen 2.2 Collection Data
+    print("Archiving Gen 2.2 collection games...", flush=True)
+    archive_cmd_2 = [
         "python3", "-c",
         "from google.cloud import storage; "
         "client = storage.Client(); "
         "bucket = client.bucket('expert-eyes-training-742'); "
         "blobs = bucket.list_blobs(prefix='logs/game_gen2_mass_collection_target'); "
-        "[(bucket.rename_blob(b, b.name.replace('logs/', 'archive/gen_2.1/', 1))) for b in blobs if not b.name.endswith('/')]"
+        "[(bucket.rename_blob(b, b.name.replace('logs/', 'archive/gen_2.2/', 1))) for b in blobs if not b.name.endswith('/')]"
     ]
-    run_cmd(archive_cmd)
+    run_cmd(archive_cmd_2)
 
-    print(f"Phase 1 Pipeline completed successfully. To enter Phase 2 loop, execute with gen_name=2.2", flush=True)
-    return True
+    print("Phase 2 Pipeline completed successfully.", flush=True)
 
 if __name__ == "__main__":
-    print("Resuming automated loop from Audit 2.2 phase...", flush=True)
-    execute_pipeline("2.1")
+    print("Starting Phase 2 Automated Loop...", flush=True)
+    execute_phase2()
