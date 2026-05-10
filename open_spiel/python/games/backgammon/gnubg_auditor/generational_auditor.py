@@ -88,7 +88,8 @@ def fetch_and_evaluate(gen_name):
     os.makedirs("audit_temp", exist_ok=True)
     
     types = ["Greedy", "MCTS"]
-    prefixes = [f"logs/game_diag_gen{gen_name}_no_mcts_", f"logs/game_diag_gen{gen_name}_mcts_"]
+    prefixes = [f"logs/game_diag_gen1.2_no_mcts_", f"logs/game_diag_gen1.2_mcts_"]
+    # HOTFIX: The configs output as gen1.2, but we evaluate as gen2.2
     
     all_game_rows = []
     summary_data = {}
@@ -193,6 +194,63 @@ def fetch_and_evaluate(gen_name):
         print(f"Uploaded {master_filename} to GCS.")
     else:
         print("No valid summary data to append to master.")
+
+
+    # Google Sheets Publish Logic
+    import urllib.request
+    import json
+    import google.auth
+    from google.auth.transport.requests import Request
+
+    SHEET_ID = os.environ.get("SHEET_ID", "1vmbqRunR5UI-ZUnEulx5-apuCdL0MY4av7miGVpH5aI")
+
+    if SHEET_ID:
+        try:
+            creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/spreadsheets"])
+            req = Request()
+            creds.refresh(req)
+            access_token = creds.token
+            headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
+
+            # Create the tab for this generation
+            batch_update_url = f"https://sheets.googleapis.com/v4/spreadsheets/{SHEET_ID}:batchUpdate"
+            add_sheets_payload = {"requests": [{"addSheet": {"properties": {"title": str(gen_name)}}}]}
+            req_create = urllib.request.Request(batch_update_url, data=json.dumps(add_sheets_payload).encode("utf-8"), headers=headers, method="POST")
+            try:
+                urllib.request.urlopen(req_create)
+            except Exception:
+                pass
+
+            def append_data(sheet_name, data):
+                if not data: return
+                url = f"https://sheets.googleapis.com/v4/spreadsheets/{SHEET_ID}/values/'{sheet_name}':append?valueInputOption=RAW"
+                req_append = urllib.request.Request(url, data=json.dumps({"values": data}).encode("utf-8"), headers=headers, method="POST")
+                try:
+                    urllib.request.urlopen(req_append)
+                    print(f"Appended to {sheet_name} in Google Sheets.")
+                except Exception as e:
+                    print(f"Error appending to {sheet_name}: {e}")
+
+            audit_run_data = [ [cell.strip() for cell in row.split('/')] for row in all_game_rows ]
+            # Also append the summary row inside the specific tab
+            audit_run_data.append([])
+            audit_run_data.append(["Name", "Type", "Checker Error Rate Average", "Checker Error Rate Median", "Snowie Error Rate Average", "Snowie Error Rate Median", "Moves Average", "Moves Median"])
+            for run_type in types:
+                s = summary_data.get(run_type)
+                if s:
+                    audit_run_data.append([str(gen_name), run_type, f"{s['ce_avg']:.1f}", f"{s['ce_med']:.1f}", f"{s['se_avg']:.1f}", f"{s['se_med']:.1f}", str(s['mv_avg']), str(s['mv_med'])])
+
+            append_data(str(gen_name), audit_run_data)
+
+            if master_row_parts:
+                master_data = [ [cell.strip() for cell in master_line.split('/')] ]
+                append_data("Master", master_data)
+
+        except Exception as e:
+            print(f"Failed to publish to Google Sheets: {e}")
+
+
+
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:

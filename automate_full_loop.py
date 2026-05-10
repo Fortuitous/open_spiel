@@ -67,9 +67,8 @@ def wait_for_job(job_name, poll_interval=3600):
 def execute_phase2():
     print("\n--- Executing Phase 2: Cycle 2.2 ---", flush=True)
 
-    # 1. Collection 2.2
-    collection_job = submit_job("phase-2-gen2.2-mass-collection", "mass_collection_gen2.yaml")
-    if not collection_job: return
+    # 1. Collection 2.2 (Already submitted by a previous run, using the running Job ID 1006421733508382720)
+    collection_job = "projects/947210424180/locations/us-central1/customJobs/1006421733508382720"
     success = wait_for_job(collection_job, poll_interval=3600)
     if not success: return
 
@@ -79,12 +78,23 @@ def execute_phase2():
     success = wait_for_job(train_job, poll_interval=1800)
     if not success: return
 
-    # 3. Eval Collect 2.3 - Greedy & MCTS
+    # 3. Eval Collect 2.3 - Greedy & Mcripts
     greedy_job_2 = submit_job("diag-gen2.3-no-mcts", "diag_no_mcts.yaml")
     mcts_job_2 = submit_job("diag-gen2.3-mcts", "diag_mcts_400.yaml")
 
     if greedy_job_2: wait_for_job(greedy_job_2, poll_interval=600)
     if mcts_job_2: wait_for_job(mcts_job_2, poll_interval=600)
+
+    print("Curating 2.3 transcripts...", flush=True)
+    curate_cmd = [
+        "python3", "-c",
+        "from google.cloud import storage; "
+        "client = storage.Client(); "
+        "bucket = client.bucket('expert-eyes-training-742'); "
+        "blobs = bucket.list_blobs(prefix='logs/'); "
+        "[(bucket.copy_blob(b, bucket, b.name.replace('logs/', 'audits/gen_2.3_transcripts/', 1))) for b in blobs if 'diag_gen1.2' in b.name and b.name.endswith('_xg.txt')]"
+    ]
+    run_cmd(curate_cmd)
 
     # 4. Audit & Publish 2.3
     print(f"Running audit script for gen 2.3...", flush=True)
