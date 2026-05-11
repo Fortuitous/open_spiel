@@ -489,10 +489,19 @@ def update_google_sheet(audit_gen):
     stdout2, _, rc2 = run(["gsutil", "cat",
                            f"gs://{BUCKET}/summaries/master_audit_summary.txt"])
     if rc2 == 0 and stdout2.strip():
-        # Get only the last line (the one just appended for this gen)
+        # Get only the last line (the one just appended for this gen).
+        # Format: "2.3 / Greedy / ... / 41         2.3 / MCTS / ... / 42"
+        # Greedy and MCTS are on the same line separated by whitespace.
+        # Split into two separate rows for the sheet.
         last_line = stdout2.strip().split("\n")[-1]
-        master_row = [[cell.strip() for cell in last_line.split("/")]]
-        _sheets_append(headers, "Master", master_row)
+        # Split on multiple spaces/tabs to separate Greedy and MCTS halves
+        import re as _re
+        halves = _re.split(r"\s{2,}", last_line.strip())
+        master_rows = []
+        for half in halves:
+            if half.strip():
+                master_rows.append([cell.strip() for cell in half.split("/")])
+        _sheets_append(headers, "Master", master_rows)
 
     log(f"  Sheet updated for {g}.")
 
