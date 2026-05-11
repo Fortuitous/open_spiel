@@ -308,6 +308,27 @@ def archive_audit_transcripts(audit_gen):
         run(["gsutil", "-m", "cp",
              f"{gs}/logs/{prefix}*_xg.txt", dest])
 
+# ──────────────────────────── Local Audit Copy ─────────────────────────
+
+WINDOWS_AUDIT_DIR = "/mnt/c/Users/jerem/Documents/ExpertEyes"
+
+def download_audits_locally(audit_gen):
+    """Download audit transcripts from GCS to the Windows filesystem."""
+    g = gen_str(audit_gen)
+    log(f"Downloading Audit {g} transcripts to Windows...")
+    if DRY_RUN:
+        log("  [DRY-RUN] Would download to Windows filesystem")
+        return
+
+    for label, prefix in [("Greedy", f"game_diag_gen{g}_no_mcts_"),
+                          ("MCTS",   f"game_diag_gen{g}_mcts_")]:
+        dest = os.path.join(WINDOWS_AUDIT_DIR, f"Audit_{g}", label)
+        os.makedirs(dest, exist_ok=True)
+        run(["gsutil", "-m", "cp",
+             f"gs://{BUCKET}/logs/{prefix}*_xg.txt", dest])
+
+    log(f"  Saved to {WINDOWS_AUDIT_DIR}/Audit_{g}/")
+
 # ──────────────────────────── Audit (local) ───────────────────────────
 
 def run_gnubg_audit(audit_gen):
@@ -342,7 +363,8 @@ def get_access_token():
     now = int(time.time())
     payload = base64.urlsafe_b64encode(json.dumps({
         "iss": sa["client_email"],
-        "scope": "https://www.googleapis.com/auth/spreadsheets",
+        "scope": ("https://www.googleapis.com/auth/spreadsheets "
+                 "https://www.googleapis.com/auth/drive.file"),
         "aud": "https://oauth2.googleapis.com/token",
         "iat": now, "exp": now + 3600
     }).encode()).rstrip(b"=")
@@ -534,6 +556,11 @@ def run_cycle(gen):
     # ── Step 5: Archive audit transcripts ──
     log(f"═══ STEP 5: Archive Audit {ng} transcripts ═══")
     archive_audit_transcripts(next_gen)
+
+    # ── Step 5b: Download audit games to Windows ──
+    log(f"═══ STEP 5b: Download Audit {ng} to Windows ═══")
+    sheet_log(f"Downloading Audit {ng} transcripts to Windows")
+    download_audits_locally(next_gen)
 
     # ── Step 6: GNUbg analysis (local) ──
     log(f"═══ STEP 6: GNUbg Analysis for {ng} ═══")
