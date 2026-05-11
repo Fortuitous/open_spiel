@@ -24,12 +24,18 @@ Usage:
     python3 master_orchestrator.py                    # Resume from GCS state
     python3 master_orchestrator.py --start-gen 2.2    # Force start from gen 2.2
     python3 master_orchestrator.py --dry-run           # Print without executing
+
+Graceful shutdown:
+    touch STOP              # Script finishes current cycle then exits
+    Ctrl+C                  # Same: finishes current cycle then exits
+    Ctrl+C twice            # Immediate abort
 """
 
 import argparse
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import tempfile
@@ -59,6 +65,31 @@ POLL_TRAIN    = 300   #  5 min
 POLL_DIAG     = 180   #  3 min
 
 DRY_RUN = False
+STOP_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "STOP")
+SHUTDOWN_REQUESTED = False
+
+def _handle_sigint(signum, frame):
+    global SHUTDOWN_REQUESTED
+    if SHUTDOWN_REQUESTED:
+        log("Second interrupt received. Aborting immediately.")
+        sys.exit(1)
+    SHUTDOWN_REQUESTED = True
+    log("")
+    log("╔══════════════════════════════════════════════════════════╗")
+    log("║  SHUTDOWN REQUESTED — will exit after current cycle.    ║")
+    log("║  Press Ctrl+C again to abort immediately.               ║")
+    log("╚══════════════════════════════════════════════════════════╝")
+
+signal.signal(signal.SIGINT, _handle_sigint)
+
+def should_stop():
+    """Check if a graceful stop has been requested."""
+    global SHUTDOWN_REQUESTED
+    if os.path.exists(STOP_FILE):
+        os.remove(STOP_FILE)
+        SHUTDOWN_REQUESTED = True
+        log("STOP file detected. Will exit after current cycle.")
+    return SHUTDOWN_REQUESTED
 
 # ──────────────────────────── Helpers ──────────────────────────────────
 
@@ -465,8 +496,14 @@ def main():
         if args.single_cycle:
             log("Single-cycle mode. Exiting.")
             break
+        if should_stop():
+            log("Graceful shutdown. Exiting after completed cycle.")
+            break
         log("Sleeping 60s before next cycle...\n")
         time.sleep(60)
+        if should_stop():
+            log("Graceful shutdown. Exiting.")
+            break
 
 if __name__ == "__main__":
     main()
