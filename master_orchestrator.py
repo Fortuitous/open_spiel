@@ -422,8 +422,9 @@ def _sheets_request(headers, endpoint, body):
 def _sheets_append(headers, sheet_name, rows):
     if not rows:
         return
+    encoded = urllib.parse.quote(sheet_name)
     url = (f"https://sheets.googleapis.com/v4/spreadsheets/{SHEET_ID}"
-           f"/values/'{sheet_name}':append?valueInputOption=RAW")
+           f"/values/{encoded}:append?valueInputOption=RAW")
     req = urllib.request.Request(
         url, data=json.dumps({"values": rows}).encode(),
         headers=headers, method="POST")
