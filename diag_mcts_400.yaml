@@ -11,4 +11,4 @@ workerPoolSpecs:
         - "--num_games=10"
         - "--sims=400"
         - "--bucket_name=expert-eyes-training-742"
-        - "--job_id=diag_gen1.2_mcts_400"
+        - "--job_id=diag_gen_manual_mcts_400"
