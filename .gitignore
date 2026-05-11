@@ -82,3 +82,4 @@ mcts_analysis.txt
 venv/
 Testing/
 connection_test.txt
+.sheets-sa-key.json

@@ -32,6 +32,9 @@ Graceful shutdown:
 """
 
 import argparse
+import base64
+import hashlib
+import hmac
 import json
 import os
 import re
@@ -41,6 +44,7 @@ import sys
 import tempfile
 import time
 import urllib.request
+import urllib.parse
 from datetime import datetime
 
 # ──────────────────────────── Configuration ────────────────────────────
@@ -51,6 +55,8 @@ BUCKET = "expert-eyes-training-742"
 IMAGE_URI = ("us-central1-docker.pkg.dev/expert-eyes-training-742/"
              "expert-eyes-repo/trainer:v21")
 SHEET_ID = "1vmbqRunR5UI-ZUnEulx5-apuCdL0MY4av7miGVpH5aI"
+SHEETS_SA_KEY = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), ".sheets-sa-key.json")
 WANDB_KEY = ("wandb_v1_7MK68vKCpzhagZo1rCYFcShbqqV_ZHpAfIussAQx3Oliu"
              "eyInrBWlxQgy5hmoRrKm2h5z8X1wLfwI")
 
@@ -322,8 +328,65 @@ def run_gnubg_audit(audit_gen):
 # ──────────────────────────── Google Sheets ───────────────────────────
 
 def get_access_token():
-    stdout, _, rc = run(["gcloud", "auth", "print-access-token"])
-    return stdout if rc == 0 else None
+    """Get an OAuth2 token from the service account key file."""
+    try:
+        with open(SHEETS_SA_KEY) as f:
+            sa = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        log(f"  Could not read SA key: {e}")
+        return None
+
+    # Build JWT
+    header = base64.urlsafe_b64encode(
+        json.dumps({"alg": "RS256", "typ": "JWT"}).encode()).rstrip(b"=")
+    now = int(time.time())
+    payload = base64.urlsafe_b64encode(json.dumps({
+        "iss": sa["client_email"],
+        "scope": "https://www.googleapis.com/auth/spreadsheets",
+        "aud": "https://oauth2.googleapis.com/token",
+        "iat": now, "exp": now + 3600
+    }).encode()).rstrip(b"=")
+
+    # Sign with RSA-SHA256 using the service account private key
+    try:
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import padding
+        key = serialization.load_pem_private_key(
+            sa["private_key"].encode(), password=None)
+        signature = key.sign(
+            header + b"." + payload,
+            padding.PKCS1v15(), hashes.SHA256())
+        sig_b64 = base64.urlsafe_b64encode(signature).rstrip(b"=")
+    except ImportError:
+        # Fallback: use openssl CLI
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".pem",
+                                         delete=False) as kf:
+            kf.write(sa["private_key"])
+            key_path = kf.name
+        try:
+            proc = subprocess.run(
+                ["openssl", "dgst", "-sha256", "-sign", key_path],
+                input=header + b"." + payload,
+                capture_output=True)
+            sig_b64 = base64.urlsafe_b64encode(proc.stdout).rstrip(b"=")
+        finally:
+            os.remove(key_path)
+
+    jwt_token = header + b"." + payload + b"." + sig_b64
+
+    # Exchange JWT for access token
+    req = urllib.request.Request(
+        "https://oauth2.googleapis.com/token",
+        data=urllib.parse.urlencode({
+            "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+            "assertion": jwt_token.decode()
+        }).encode())
+    try:
+        resp = urllib.request.urlopen(req)
+        return json.loads(resp.read())["access_token"]
+    except Exception as e:
+        log(f"  Token exchange failed: {e}")
+        return None
 
 def _sheets_request(headers, endpoint, body):
     url = f"https://sheets.googleapis.com/v4/spreadsheets/{SHEET_ID}:{endpoint}"
