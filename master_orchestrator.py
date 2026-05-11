@@ -174,8 +174,9 @@ def yaml_collection(gen):
         f'        - "{BUCKET}"\n'
         f'        - "--wandb"\n'
         f'{_wandb_env()}')
-    w0 = worker.format(replicas=8)
-    return (f'workerPoolSpecs:\n{w0}\n'
+    w0 = worker.format(replicas=1)
+    w1 = worker.format(replicas=7)
+    return (f'workerPoolSpecs:\n{w0}\n{w1}\n'
             f'scheduling:\n  timeout: 43200s\n'
             f'  restartJobOnWorkerRestart: true\n  strategy: SPOT\n')
 
