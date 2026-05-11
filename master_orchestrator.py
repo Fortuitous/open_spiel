@@ -60,6 +60,11 @@ SHEETS_SA_KEY = os.path.join(
 WANDB_KEY = ("wandb_v1_7MK68vKCpzhagZo1rCYFcShbqqV_ZHpAfIussAQx3Oliu"
              "eyInrBWlxQgy5hmoRrKm2h5z8X1wLfwI")
 
+# Dynamic generation-based prefix for collection data
+def get_collection_prefix(gen):
+    return f"gen{gen_str(gen)}_mass_collection"
+
+# Legacy/Base prefix if needed
 COLLECTION_PREFIX = "gen2_mass_collection_target"
 AUDITOR_SCRIPT = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
@@ -146,7 +151,8 @@ def _wandb_env():
             f'        - name: WANDB_API_KEY\n'
             f'          value: "{WANDB_KEY}"')
 
-def yaml_collection():
+def yaml_collection(gen):
+    prefix = get_collection_prefix(gen)
     worker = (
         f'  - machineSpec:\n'
         f'      machineType: n1-highmem-4\n'
@@ -163,18 +169,17 @@ def yaml_collection():
         f'        - "--global_target"\n'
         f'        - "1000"\n'
         f'        - "--job_id"\n'
-        f'        - "{COLLECTION_PREFIX}"\n'
+        f'        - "{prefix}"\n'
         f'        - "--bucket_name"\n'
         f'        - "{BUCKET}"\n'
         f'        - "--wandb"\n'
         f'{_wandb_env()}')
-    w0 = worker.format(replicas=1)
-    w1 = worker.format(replicas=7)
-    return (f'workerPoolSpecs:\n{w0}\n{w1}\n'
+    w0 = worker.format(replicas=8)
+    return (f'workerPoolSpecs:\n{w0}\n'
             f'scheduling:\n  timeout: 43200s\n'
             f'  restartJobOnWorkerRestart: true\n  strategy: SPOT\n')
 
-def yaml_train():
+def yaml_train(gen):
     return (
         f'workerPoolSpecs:\n'
         f'  - machineSpec:\n'
@@ -196,7 +201,7 @@ def yaml_train():
         f'        - "--bucket_name"\n'
         f'        - "{BUCKET}"\n'
         f'        - "--log_prefix"\n'
-        f'        - "logs/game_{COLLECTION_PREFIX}"\n'
+        f'        - "logs/game_{get_collection_prefix(gen)}"\n'
         f'        - "--wandb"\n'
         f'{_wandb_env()}\n'
         f'scheduling:\n  timeout: 14400s\n'
@@ -293,8 +298,9 @@ def archive_collection_data(gen):
     if DRY_RUN:
         return
     # Move both .pt_data and _xg.txt files
+    prefix = get_collection_prefix(gen)
     run(["gsutil", "-m", "mv",
-         f"{gs}/logs/game_{COLLECTION_PREFIX}_*", dest])
+         f"{gs}/logs/game_{prefix}_*", dest])
 
 def archive_audit_transcripts(audit_gen):
     """Copy diagnostic _xg.txt files to audits/gen_X_transcripts/."""
@@ -526,7 +532,13 @@ def run_cycle(gen):
     # ── Step 1: Collection ──
     log(f"═══ STEP 1: Collection {g} (1000 games with Model {g}) ═══")
     sheet_log(f"Starting Collection {g} (1000 games with Model {g})")
-    job = submit_job(f"collection-{g}", yaml_collection())
+    
+    # Pre-collection cleanup to ensure no old files confuse the count
+    prefix = get_collection_prefix(gen)
+    log(f"  Cleaning up any existing logs with prefix {prefix}...")
+    run(["gsutil", "-m", "rm", "-f", f"gs://{BUCKET}/logs/game_{prefix}_*"])
+    
+    job = submit_job(f"collection-{g}", yaml_collection(gen))
     if not job or not wait_for_job(job, POLL_COLLECT):
         sheet_log(f"FAILED: Collection {g} job failed", "ERROR")
         log("FATAL: Collection failed."); sys.exit(1)
@@ -535,7 +547,7 @@ def run_cycle(gen):
     # ── Step 2: Training ──
     log(f"═══ STEP 2: Training {g} (→ Model {ng}) ═══")
     sheet_log(f"Starting Training {g} (→ Model {ng})")
-    job = submit_job(f"training-{g}", yaml_train())
+    job = submit_job(f"training-{g}", yaml_train(gen))
     if not job or not wait_for_job(job, POLL_TRAIN):
         sheet_log(f"FAILED: Training {g} job failed", "ERROR")
         log("FATAL: Training failed."); sys.exit(1)
