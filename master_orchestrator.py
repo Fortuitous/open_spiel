@@ -325,6 +325,43 @@ def get_access_token():
     stdout, _, rc = run(["gcloud", "auth", "print-access-token"])
     return stdout if rc == 0 else None
 
+def _sheets_request(headers, endpoint, body):
+    url = f"https://sheets.googleapis.com/v4/spreadsheets/{SHEET_ID}:{endpoint}"
+    req = urllib.request.Request(
+        url, data=json.dumps(body).encode(), headers=headers, method="POST")
+    try:
+        urllib.request.urlopen(req)
+    except Exception:
+        pass  # Tab may already exist
+
+def _sheets_append(headers, sheet_name, rows):
+    if not rows:
+        return
+    url = (f"https://sheets.googleapis.com/v4/spreadsheets/{SHEET_ID}"
+           f"/values/'{sheet_name}':append?valueInputOption=RAW")
+    req = urllib.request.Request(
+        url, data=json.dumps({"values": rows}).encode(),
+        headers=headers, method="POST")
+    try:
+        urllib.request.urlopen(req)
+    except Exception as e:
+        log(f"  Sheet append error: {e}")
+
+def sheet_log(message, level="INFO"):
+    """Append a timestamped log row to the 'Logs' tab in Google Sheet."""
+    if DRY_RUN:
+        return
+    token = get_access_token()
+    if not token:
+        return
+    headers = {"Authorization": f"Bearer {token}",
+               "Content-Type": "application/json"}
+    # Ensure Logs tab exists
+    _sheets_request(headers, "batchUpdate", {
+        "requests": [{"addSheet": {"properties": {"title": "Logs"}}}]})
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    _sheets_append(headers, "Logs", [[ts, level, message]])
+
 def update_google_sheet(audit_gen):
     """Read audit results from GCS and append to Google Sheet."""
     g = gen_str(audit_gen)
@@ -373,28 +410,6 @@ def update_google_sheet(audit_gen):
 
     log(f"  Sheet updated for {g}.")
 
-def _sheets_request(headers, endpoint, body):
-    url = f"https://sheets.googleapis.com/v4/spreadsheets/{SHEET_ID}:{endpoint}"
-    req = urllib.request.Request(
-        url, data=json.dumps(body).encode(), headers=headers, method="POST")
-    try:
-        urllib.request.urlopen(req)
-    except Exception:
-        pass  # Tab may already exist
-
-def _sheets_append(headers, sheet_name, rows):
-    if not rows:
-        return
-    url = (f"https://sheets.googleapis.com/v4/spreadsheets/{SHEET_ID}"
-           f"/values/'{sheet_name}':append?valueInputOption=RAW")
-    req = urllib.request.Request(
-        url, data=json.dumps({"values": rows}).encode(),
-        headers=headers, method="POST")
-    try:
-        urllib.request.urlopen(req)
-    except Exception as e:
-        log(f"  Sheet append error: {e}")
-
 # ──────────────────────────── Main Cycle ──────────────────────────────
 
 def run_cycle(gen):
@@ -415,22 +430,30 @@ def run_cycle(gen):
 
     # ── Step 1: Collection ──
     log(f"═══ STEP 1: Collection {g} (1000 games with Model {g}) ═══")
+    sheet_log(f"Starting Collection {g} (1000 games with Model {g})")
     job = submit_job(f"collection-{g}", yaml_collection())
     if not job or not wait_for_job(job, POLL_COLLECT):
+        sheet_log(f"FAILED: Collection {g} job failed", "ERROR")
         log("FATAL: Collection failed."); sys.exit(1)
+    sheet_log(f"Completed Collection {g}")
 
     # ── Step 2: Training ──
     log(f"═══ STEP 2: Training {g} (→ Model {ng}) ═══")
+    sheet_log(f"Starting Training {g} (→ Model {ng})")
     job = submit_job(f"training-{g}", yaml_train())
     if not job or not wait_for_job(job, POLL_TRAIN):
+        sheet_log(f"FAILED: Training {g} job failed", "ERROR")
         log("FATAL: Training failed."); sys.exit(1)
+    sheet_log(f"Completed Training {g} → Model {ng} created")
 
     # ── Step 3: Archive collection data ──
     log(f"═══ STEP 3: Archive Collection {g} data ═══")
+    sheet_log(f"Archiving Collection {g} data")
     archive_collection_data(gen)
 
     # ── Step 4: Audit with new model ──
     log(f"═══ STEP 4: Audit {ng} (20 games with Model {ng}) ═══")
+    sheet_log(f"Starting Audit {ng} (20 games with Model {ng})")
     greedy_id = f"diag_gen{ng}_no_mcts"
     mcts_id = f"diag_gen{ng}_mcts_400"
 
@@ -438,9 +461,12 @@ def run_cycle(gen):
     j2 = submit_job(f"audit-{ng}-mcts",   yaml_diag(ng, 400, mcts_id))
 
     if j1 and not wait_for_job(j1, POLL_DIAG):
+        sheet_log(f"FAILED: Audit {ng} greedy job failed", "ERROR")
         log("FATAL: Greedy audit job failed."); sys.exit(1)
     if j2 and not wait_for_job(j2, POLL_DIAG):
+        sheet_log(f"FAILED: Audit {ng} MCTS job failed", "ERROR")
         log("FATAL: MCTS audit job failed."); sys.exit(1)
+    sheet_log(f"Completed Audit {ng} eval games")
 
     # ── Step 5: Archive audit transcripts ──
     log(f"═══ STEP 5: Archive Audit {ng} transcripts ═══")
@@ -448,6 +474,7 @@ def run_cycle(gen):
 
     # ── Step 6: GNUbg analysis (local) ──
     log(f"═══ STEP 6: GNUbg Analysis for {ng} ═══")
+    sheet_log(f"Running GNUbg analysis for Audit {ng}")
     run_gnubg_audit(next_gen)
 
     # ── Step 7: Google Sheets ──
@@ -456,6 +483,7 @@ def run_cycle(gen):
 
     # ── Step 8: Save state ──
     save_gen_state(next_gen)
+    sheet_log(f"✓ Cycle complete: Model {g} → Model {ng}")
     log(f"═══ Cycle complete: Model {g} → Model {ng} ═══\n")
 
     return next_gen
